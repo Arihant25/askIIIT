@@ -1,0 +1,4 @@
+pdfs
+embeddings
+faiss_index.bin
+faiss_index.meta
