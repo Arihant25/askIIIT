@@ -2,11 +2,11 @@ import { API_ENDPOINTS } from '../config/api';
 
 class ApiService {
 
-  async sendChatMessage(message, category = null, conversationId = null) {
+  async sendChatMessage(message, categories = null, conversationId = null) {
     try {
       const payload = {
         message,
-        category,
+        categories,
         conversation_id: conversationId,
       };
 
@@ -29,11 +29,11 @@ class ApiService {
     }
   }
 
-  async sendChatMessageStream(message, category = null, conversationId = null, onMessage, onComplete, onError) {
+  async sendChatMessageStream(message, categories = null, conversationId = null, onMessage, onComplete, onError) {
     try {
       const payload = {
         message,
-        category,
+        categories,
         conversation_id: conversationId,
       };
 

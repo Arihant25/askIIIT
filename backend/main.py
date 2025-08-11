@@ -85,13 +85,13 @@ class ChunkData(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    category: Optional[str] = None
+    categories: Optional[List[str]] = None
     limit: Optional[int] = 10
 
 
 class ChatRequest(BaseModel):
     message: str
-    category: Optional[str] = None
+    categories: Optional[List[str]] = None
     conversation_id: Optional[str] = None
 
 
@@ -412,7 +412,7 @@ async def upload_document(
 
 @app.get("/api/documents")
 async def list_documents(
-    category: Optional[str] = None,
+    categories: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     current_user: UserInfo = Depends(get_current_user),
@@ -421,8 +421,13 @@ async def list_documents(
     try:
         # Query documents collection
         where_clause = {}
-        if category:
-            where_clause["category"] = category
+        if categories:
+            # Support both single category (backward compatibility) and comma-separated categories
+            category_list = [cat.strip() for cat in categories.split(",")]
+            if len(category_list) == 1:
+                where_clause["category"] = category_list[0]
+            else:
+                where_clause["category"] = {"$in": category_list}
 
         results = documents_collection.get(
             where=where_clause if where_clause else None, limit=limit, offset=offset
@@ -448,8 +453,11 @@ async def search_documents(
     try:
         # Build where clause for filtering
         where_clause = {}
-        if query_request.category:
-            where_clause["category"] = query_request.category
+        if query_request.categories:
+            if len(query_request.categories) == 1:
+                where_clause["category"] = query_request.categories[0]
+            else:
+                where_clause["category"] = {"$in": query_request.categories}
 
         # Perform semantic search on chunks
         results = chunks_collection.query(
@@ -489,8 +497,11 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # First, search for relevant documents
         where_clause = {}
-        if chat_request.category:
-            where_clause["category"] = chat_request.category
+        if chat_request.categories:
+            if len(chat_request.categories) == 1:
+                where_clause["category"] = chat_request.categories[0]
+            else:
+                where_clause["category"] = {"$in": chat_request.categories}
 
         search_results = chunks_collection.query(
             query_texts=[chat_request.message],
@@ -582,8 +593,11 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
             # First, search for relevant documents
             where_clause = {}
-            if chat_request.category:
-                where_clause["category"] = chat_request.category
+            if chat_request.categories:
+                if len(chat_request.categories) == 1:
+                    where_clause["category"] = chat_request.categories[0]
+                else:
+                    where_clause["category"] = {"$in": chat_request.categories}
 
             search_results = chunks_collection.query(
                 query_texts=[chat_request.message],

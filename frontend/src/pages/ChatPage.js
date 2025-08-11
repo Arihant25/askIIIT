@@ -13,7 +13,7 @@ const categories = [
 const ChatPage = () => {
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [selectedCategory, setSelectedCategory] = useState('academics');
+    const [selectedCategories, setSelectedCategories] = useState([]);
     const [messages, setMessages] = useState([]);
     const [chatStarted, setChatStarted] = useState(false);
     const [conversationId, setConversationId] = useState(null);
@@ -21,6 +21,95 @@ const ChatPage = () => {
     const [isStreaming, setIsStreaming] = useState(false);
     const [backendStatus, setBackendStatus] = useState('checking'); // 'checking', 'connected', 'disconnected'
     const messagesEndRef = useRef(null);
+
+    // Function to process sources and add inline citations
+    const processMessageWithCitations = (content, sources) => {
+        if (!sources || sources.length === 0) {
+            return { processedContent: content, groupedSources: [] };
+        }
+
+        // Group sources by filename and collect their indexes
+        const sourceMap = new Map();
+        sources.forEach((source, index) => {
+            const key = source.filename;
+            if (!sourceMap.has(key)) {
+                sourceMap.set(key, {
+                    filename: source.filename,
+                    category: source.category,
+                    indexes: []
+                });
+            }
+            sourceMap.get(key).indexes.push(index + 1);
+        });
+
+        const groupedSources = Array.from(sourceMap.values());
+
+        // Enhanced citation placement logic
+        let processedContent = content;
+
+        // Split content into sentences (handle empty content)
+        if (!content || content.trim().length === 0) {
+            return { processedContent: content, groupedSources };
+        }
+
+        const sentences = content.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+
+        if (sentences.length > 0 && sources.length > 0) {
+            const citationsPerSentence = Math.max(1, Math.ceil(sources.length / sentences.length));
+            let citationIndex = 0;
+
+            // Add citations to sentences
+            const citedSentences = sentences.map((sentence, sentenceIndex) => {
+                let citedSentence = sentence;
+
+                // Determine how many citations to add to this sentence
+                const citationsToAdd = Math.min(
+                    citationsPerSentence,
+                    sources.length - citationIndex
+                );
+
+                if (citationsToAdd > 0) {
+                    const citationNumbers = [];
+                    for (let i = 0; i < citationsToAdd; i++) {
+                        citationNumbers.push(citationIndex + 1);
+                        citationIndex++;
+                    }
+
+                    const citationText = citationNumbers.map(num =>
+                        `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
+                    ).join('');
+
+                    // Add citation at the end of the sentence, before the period if it exists
+                    if (sentence.match(/[.!?]$/)) {
+                        citedSentence = sentence.slice(0, -1) + citationText + sentence.slice(-1);
+                    } else {
+                        citedSentence = sentence + citationText;
+                    }
+                }
+
+                return citedSentence;
+            });
+
+            // Add any remaining citations to the last sentence if needed
+            if (citationIndex < sources.length) {
+                const remainingCitations = [];
+                for (let i = citationIndex; i < sources.length; i++) {
+                    remainingCitations.push(i + 1);
+                }
+                const remainingCitationText = remainingCitations.map(num =>
+                    `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
+                ).join('');
+
+                if (citedSentences.length > 0) {
+                    citedSentences[citedSentences.length - 1] += remainingCitationText;
+                }
+            }
+
+            processedContent = citedSentences.join(' ');
+        }
+
+        return { processedContent, groupedSources };
+    };
 
     // Check backend status on component mount
     useEffect(() => {
@@ -77,7 +166,7 @@ const ChatPage = () => {
 
             await ApiService.sendChatMessageStream(
                 userMessage.content,
-                selectedCategory,
+                selectedCategories, // Send array of categories
                 conversationId,
                 // onMessage callback
                 (data) => {
@@ -105,13 +194,20 @@ const ChatPage = () => {
                 },
                 // onComplete callback
                 (finalContent, finalMetadata) => {
+                    const { processedContent, groupedSources } = processMessageWithCitations(
+                        finalContent || accumulatedContent,
+                        finalMetadata?.context_chunks || []
+                    );
+
                     setMessages(prev =>
                         prev.map(msg =>
                             msg.id === botMessageId
                                 ? {
                                     ...msg,
                                     content: finalContent || accumulatedContent,
+                                    processedContent: processedContent,
                                     sources: finalMetadata?.context_chunks || [],
+                                    groupedSources: groupedSources,
                                     isStreaming: false,
                                     contextFound: finalMetadata?.context_found
                                 }
@@ -203,18 +299,41 @@ const ChatPage = () => {
                                             : 'bg-[#93c5fd] text-[#232946]'
                                         }`}
                                 >
-                                    {message.content}
+                                    {/* Display processed content with citations for bot messages */}
+                                    {message.type === 'bot' && message.processedContent ? (
+                                        <div
+                                            dangerouslySetInnerHTML={{ __html: message.processedContent }}
+                                            className="message-content"
+                                        />
+                                    ) : (
+                                        message.content
+                                    )}
+
                                     {/* Show streaming indicator */}
                                     {message.type === 'bot' && message.isStreaming && (
                                         <span className="inline-block w-2 h-5 bg-[#60a5fa] animate-pulse ml-1"></span>
                                     )}
-                                    {/* Show sources if available */}
-                                    {message.type === 'bot' && message.sources && message.sources.length > 0 && (
+
+                                    {/* Show grouped sources if available */}
+                                    {message.type === 'bot' && message.groupedSources && message.groupedSources.length > 0 && (
                                         <div className="mt-3 pt-3 border-t border-[#232946]/20">
-                                            <div className="text-sm opacity-75 mb-2">Sources:</div>
-                                            {message.sources.map((source, idx) => (
-                                                <div key={idx} className="text-xs opacity-60 mb-1">
-                                                    • {source.filename} ({source.category})
+                                            <div className="text-sm opacity-75 mb-2">References:</div>
+                                            {message.groupedSources.map((source, idx) => (
+                                                <div key={idx} className="text-xs opacity-70 mb-1.5 flex items-start gap-2">
+                                                    <div className="flex flex-wrap gap-1 min-w-fit">
+                                                        {source.indexes.map(index => (
+                                                            <span
+                                                                key={index}
+                                                                className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-[#232946] text-[#93c5fd] rounded-full"
+                                                            >
+                                                                {index}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                    <span className="flex-1">
+                                                        <span className="font-medium">{source.filename}</span>
+                                                        <span className="opacity-60 ml-1">({source.category})</span>
+                                                    </span>
                                                 </div>
                                             ))}
                                         </div>
@@ -243,7 +362,9 @@ const ChatPage = () => {
                             type="text"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
-                            placeholder={`Ask me anything...`}
+                            placeholder={selectedCategories.length > 0
+                                ? `Ask about ${selectedCategories.join(', ')}...`
+                                : `Ask me anything (all categories)...`}
                             className="chat-input flex-1 px-5 py-3.5 rounded-xl border-none text-lg bg-[#181A20] text-[#93c5fd] outline-none shadow-sm"
                             disabled={isLoading}
                         />
@@ -256,20 +377,33 @@ const ChatPage = () => {
                         </button>
                     </div>
                     <div className="w-full flex gap-2.5 justify-center mt-0">
-                        {categories.map(cat => {
-                            const IconComp = cat.icon;
-                            return (
-                                <button
-                                    key={cat.id}
-                                    type="button"
-                                    onClick={() => setSelectedCategory(cat.id)}
-                                    className={`flex items-center gap-2.5 rounded-lg px-4 py-2 font-medium text-base border-none cursor-pointer transition-all duration-200 ${selectedCategory === cat.id ? 'bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md' : 'bg-[#181A20] text-[#93c5fd]'}`}
-                                >
-                                    <IconComp size={20} style={{ color: selectedCategory === cat.id ? '#181A20' : '#93c5fd' }} />
-                                    <span>{cat.label}</span>
-                                </button>
-                            );
-                        })}
+                        <div className="flex gap-2.5 justify-center">
+                            {categories.map(cat => {
+                                const IconComp = cat.icon;
+                                const isSelected = selectedCategories.includes(cat.id);
+                                return (
+                                    <button
+                                        key={cat.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedCategories(prev => {
+                                                if (prev.includes(cat.id)) {
+                                                    // Remove category if already selected
+                                                    return prev.filter(id => id !== cat.id);
+                                                } else {
+                                                    // Add category if not selected
+                                                    return [...prev, cat.id];
+                                                }
+                                            });
+                                        }}
+                                        className={`flex items-center gap-2.5 rounded-lg px-4 py-2 font-medium text-base border-none cursor-pointer transition-all duration-200 ${isSelected ? 'bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md' : 'bg-[#181A20] text-[#93c5fd]'}`}
+                                    >
+                                        <IconComp size={20} style={{ color: isSelected ? '#181A20' : '#93c5fd' }} />
+                                        <span>{cat.label}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
                 </form>
             </div>
