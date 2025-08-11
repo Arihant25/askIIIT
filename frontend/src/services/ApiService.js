@@ -1,7 +1,7 @@
 import { API_ENDPOINTS } from '../config/api';
 
 class ApiService {
-  
+
   async sendChatMessage(message, category = null, conversationId = null) {
     try {
       const payload = {
@@ -56,7 +56,7 @@ class ApiService {
 
       while (true) {
         const { done, value } = await reader.read();
-        
+
         if (done) {
           onComplete?.(accumulatedResponse, metadata);
           break;
@@ -69,12 +69,14 @@ class ApiService {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+
               if (data.type === 'metadata') {
                 metadata = data;
                 onMessage?.(data);
               } else if (data.type === 'content') {
-                accumulatedResponse += data.content;
+                if (data.content) {  // Only accumulate non-empty content
+                  accumulatedResponse += data.content;
+                }
                 onMessage?.(data);
               } else if (data.type === 'error') {
                 onError?.(new Error(data.error));

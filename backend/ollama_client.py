@@ -117,10 +117,11 @@ class OllamaClient:
                         "model": self.chat_model,
                         "prompt": full_prompt,
                         "stream": False,
+                        "think": False,
                         "options": {
                             "temperature": 0.7,
                             "top_p": 0.9,
-                            "max_tokens": 2048,
+                            "max_tokens": 4096,
                         },
                     },
                 )
@@ -138,6 +139,65 @@ class OllamaClient:
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return f"I encountered an error while processing your request: {str(e)}"
+
+    async def generate_response_stream(
+        self,
+        prompt: str,
+        context: Optional[List[str]] = None,
+        system_prompt: Optional[str] = None,
+    ):
+        """Generate streaming response using Qwen chat model"""
+        try:
+            # Ensure chat model is available
+            if not await self.ensure_model_available(self.chat_model):
+                raise Exception(f"Chat model {self.chat_model} not available")
+
+            # Build the full prompt
+            full_prompt = ""
+
+            if system_prompt:
+                full_prompt += f"System: {system_prompt}\n\n"
+
+            if context:
+                full_prompt += "Context:\n"
+                # Limit to 5 context chunks
+                for i, ctx in enumerate(context[:5]):
+                    full_prompt += f"{i+1}. {ctx}\n"
+                full_prompt += "\n"
+
+            full_prompt += f"User: {prompt}\n\nAssistant:"
+
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/api/generate",
+                    json={
+                        "model": self.chat_model,
+                        "prompt": full_prompt,
+                        "stream": True,
+                        "think": False,
+                        "options": {
+                            "temperature": 0.7,
+                            "top_p": 0.9,
+                            "max_tokens": 4096,
+                        },
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line:
+                            try:
+                                data = json.loads(line)
+                                if "response" in data:
+                                    yield data["response"]
+                                if data.get("done", False):
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+
+        except Exception as e:
+            logger.error(f"Error generating streaming response: {e}")
+            yield f"I encountered an error while processing your request: {str(e)}"
 
     async def summarize_text(self, text: str, max_length: int = 200) -> str:
         """Generate summary of text using Qwen model"""

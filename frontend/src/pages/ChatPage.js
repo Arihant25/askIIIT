@@ -72,31 +72,66 @@ const ChatPage = () => {
         setMessages(prev => [...prev, botMessage]);
 
         try {
-            await ApiService.sendChatMessage(
+            let accumulatedContent = '';
+            let metadata = null;
+
+            await ApiService.sendChatMessageStream(
                 userMessage.content,
                 selectedCategory,
-                conversationId
-            ).then(response => {
-                // Update conversation ID if this is the first message
-                if (!conversationId && response.conversation_id) {
-                    setConversationId(response.conversation_id);
+                conversationId,
+                // onMessage callback
+                (data) => {
+                    if (data.type === 'metadata') {
+                        metadata = data;
+                        // Update conversation ID if this is the first message
+                        if (!conversationId && data.conversation_id) {
+                            setConversationId(data.conversation_id);
+                        }
+                    } else if (data.type === 'content') {
+                        accumulatedContent += data.content;
+                        // Update the bot message with accumulated content
+                        setMessages(prev =>
+                            prev.map(msg =>
+                                msg.id === botMessageId
+                                    ? {
+                                        ...msg,
+                                        content: accumulatedContent,
+                                        isStreaming: !data.is_final
+                                    }
+                                    : msg
+                            )
+                        );
+                    }
+                },
+                // onComplete callback
+                (finalContent, finalMetadata) => {
+                    setMessages(prev =>
+                        prev.map(msg =>
+                            msg.id === botMessageId
+                                ? {
+                                    ...msg,
+                                    content: finalContent || accumulatedContent,
+                                    sources: finalMetadata?.context_chunks || [],
+                                    isStreaming: false,
+                                    contextFound: finalMetadata?.context_found
+                                }
+                                : msg
+                        )
+                    );
+                },
+                // onError callback
+                (error) => {
+                    console.error('Chat streaming error:', error);
+                    const errorMessage = {
+                        id: Date.now() + 1,
+                        type: 'bot',
+                        content: 'Sorry, I encountered an error while processing your question. Please try again.',
+                        timestamp: new Date(),
+                        isError: true
+                    };
+                    setMessages(prev => [...prev.slice(0, -1), errorMessage]);
                 }
-
-                // Update the bot message with the complete response
-                setMessages(prev =>
-                    prev.map(msg =>
-                        msg.id === botMessageId
-                            ? {
-                                ...msg,
-                                content: response.response,
-                                sources: response.context_chunks || [],
-                                isStreaming: false,
-                                contextFound: response.context_found
-                            }
-                            : msg
-                    )
-                );
-            });
+            );
         } catch (error) {
             console.error('Chat error:', error);
             const errorMessage = {
@@ -134,10 +169,10 @@ const ChatPage = () => {
                 {/* Backend status indicator */}
                 {chatStarted && (
                     <div className={`flex items-center gap-2 text-sm ${backendStatus === 'connected' ? 'text-green-400' :
-                            backendStatus === 'disconnected' ? 'text-red-400' : 'text-yellow-400'
+                        backendStatus === 'disconnected' ? 'text-red-400' : 'text-yellow-400'
                         }`}>
                         <div className={`w-2 h-2 rounded-full ${backendStatus === 'connected' ? 'bg-green-400' :
-                                backendStatus === 'disconnected' ? 'bg-red-400' : 'bg-yellow-400'
+                            backendStatus === 'disconnected' ? 'bg-red-400' : 'bg-yellow-400'
                             }`}></div>
                         {backendStatus === 'connected' ? 'Connected' :
                             backendStatus === 'disconnected' ? 'Backend Offline' : 'Checking...'}
@@ -168,15 +203,11 @@ const ChatPage = () => {
                                             : 'bg-[#93c5fd] text-[#232946]'
                                         }`}
                                 >
-
-                                    {isLoading && (message.type === 'bot') && (
-                                        <div className="flex gap-1.5">
-                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse"></span>
-                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-150"></span>
-                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-300"></span>
-                                        </div>
-                                    )}
                                     {message.content}
+                                    {/* Show streaming indicator */}
+                                    {message.type === 'bot' && message.isStreaming && (
+                                        <span className="inline-block w-2 h-5 bg-[#60a5fa] animate-pulse ml-1"></span>
+                                    )}
                                     {/* Show sources if available */}
                                     {message.type === 'bot' && message.sources && message.sources.length > 0 && (
                                         <div className="mt-3 pt-3 border-t border-[#232946]/20">

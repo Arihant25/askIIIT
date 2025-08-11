@@ -15,6 +15,7 @@ import httpx
 from urllib.parse import urlencode, quote
 import logging
 import json
+import uvicorn
 
 # Load environment variables
 load_dotenv()
@@ -506,11 +507,12 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # Prepare system prompt for Qwen3
         system_prompt = (
-            "You are askIIIT, a helpful assistant for IIIT Hyderabad. "
-            "You help students, faculty, and staff find information from official documents. "
-            "Use the provided context to answer questions accurately. "
-            "If you cannot find relevant information in the context, say so politely. "
-            "Always be helpful, concise, and reference the source documents when applicable."
+            f"You are askIIIT, a helpful assistant for IIIT Hyderabad. "
+            f"You help students, faculty, and staff find information from official documents. "
+            f"Use the provided context to answer questions accurately. "
+            f"If you cannot find relevant information in the context, say so politely. "
+            f"Always be helpful, concise, and reference the source documents when applicable. "
+            f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
         )
 
         # Generate response using Qwen3 via Ollama
@@ -623,37 +625,45 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
             # Generate and stream response
             system_prompt = (
-                "You are askIIIT, a helpful assistant for IIIT Hyderabad. "
-                "You help students, faculty, and staff find information from official documents. "
-                "Use the provided context to answer questions accurately. "
-                "If you cannot find relevant information in the context, say so politely. "
-                "Always be helpful, concise, and reference the source documents when applicable."
+                f"You are askIIIT, a helpful assistant for IIIT Hyderabad. "
+                f"You help students, faculty, and staff find information from official documents. "
+                f"Use the provided context to answer questions accurately. "
+                f"If you cannot find relevant information in the context, say so politely. "
+                f"Always be helpful, concise, and reference the source documents when applicable. "
+                f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
             )
 
             # Stream response from Ollama
             if context_chunks:
-                response = await ollama_client.generate_response(
+                response_stream = ollama_client.generate_response_stream(
                     prompt=chat_request.message,
                     context=context_chunks,
                     system_prompt=system_prompt,
                 )
             else:
-                response = await ollama_client.generate_response(
+                response_stream = ollama_client.generate_response_stream(
                     prompt=chat_request.message,
                     system_prompt=system_prompt
                     + " Note: No relevant documents were found for this query.",
                 )
 
-            # Send the response in chunks for streaming effect
-            chunk_size = 10  # Characters per chunk
-            for i in range(0, len(response), chunk_size):
-                chunk = response[i:i + chunk_size]
-                chunk_response = {
-                    "type": "content",
-                    "content": chunk,
-                    "is_final": i + chunk_size >= len(response)
-                }
-                yield f"data: {json.dumps(chunk_response)}\n\n"
+            # Stream the response chunks
+            async for chunk in response_stream:
+                if chunk:
+                    chunk_response = {
+                        "type": "content",
+                        "content": chunk,
+                        "is_final": False
+                    }
+                    yield f"data: {json.dumps(chunk_response)}\n\n"
+
+            # Send final marker
+            final_response = {
+                "type": "content",
+                "content": "",
+                "is_final": True
+            }
+            yield f"data: {json.dumps(final_response)}\n\n"
 
         except Exception as e:
             logger.error(f"Error in streaming chat: {e}")
@@ -665,7 +675,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
     return StreamingResponse(
         generate_response(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
@@ -712,8 +722,6 @@ async def get_stats(current_user: UserInfo = Depends(get_current_user)):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(
         "main:app",
         host=os.getenv("HOST", "0.0.0.0"),
