@@ -7,7 +7,6 @@ import os
 import sys
 from pathlib import Path
 import logging
-from typing import List
 import chromadb
 
 # Add backend directory to Python path

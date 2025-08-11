@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Book, School, Target, Microscope } from 'lucide-react';
+import { Book, School, Target, Microscope, User, Bot, ArrowUpRight } from 'lucide-react';
 
 const categories = [
     { id: 'academics', label: 'Academics', icon: Book, sources: ['academic-handbook'] },
@@ -89,8 +89,8 @@ const ChatPage = () => {
                 <h1
                     className={
                         chatStarted
-                            ? "text-[#3b82f6] font-semibold text-3xl text-left mb-0 tracking-wide"
-                            : "text-[#3b82f6] font-semibold text-7xl text-center mb-[20vh] tracking-wide"
+                            ? "text-[#60a5fa] font-semibold text-3xl text-left mb-0 tracking-wide"
+                            : "text-[#60a5fa] font-semibold text-7xl text-center mb-[20vh] tracking-wide"
                     }
                 >
                     askIIIT
@@ -98,26 +98,42 @@ const ChatPage = () => {
             </div>
             <div className={
                 chatStarted
-                    ? "flex flex-col h-screen w-full p-4"
+                    ? "flex flex-col mt-[5vh] h-[81vh] w-full p-4"
                     : "w-full max-w-xl mx-auto mt-8 flex flex-col items-center justify-end p-4"
             }>
                 {/* Only show chat messages area after chatStarted */}
                 {chatStarted && (
-                    <div className="chat-messages w-full max-w-5xl flex flex-col items-center justify-center shadow-md relative mx-auto mt-20 mb-40 overflow-y-auto hide-scrollbar">
+                    <div className="chat-messages w-full max-w-5xl flex-1 flex flex-col items-center mx-auto overflow-y-auto hide-scrollbar" >
                         {messages.map((message) => (
-                            <div key={message.id} className={`message ${message.type} w-full flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className="max-w-[80%] bg-[#232946] text-[#aeb8fe] rounded-2xl my-2 px-6 py-4 text-lg shadow-md">
+                            <div key={message.id} className={`message ${message.type} w-full flex items-end gap-4 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                {/* Avatar for bot/user */}
+                                {message.type === 'bot' && (
+                                    <div className="avatar-bot w-12 h-12 rounded-full bg-[#232946] flex items-center justify-center shadow-lg">
+                                        <Bot size={32} color="#93c5fd" />
+                                    </div>
+                                )}
+                                <div
+                                    className={`max-w-[80%] rounded-2xl my-2 px-6 py-4 text-lg shadow-md whitespace-pre-line break-words ${message.type === 'user'
+                                        ? 'bg-[#60a5fa] text-[#181A20]'
+                                        : 'bg-[#93c5fd] text-[#232946]'
+                                        }`}
+                                >
                                     {message.content}
                                 </div>
+                                {message.type === 'user' && (
+                                    <div className="avatar-user w-12 h-12 rounded-full bg-[#232946] flex items-center justify-center shadow-lg">
+                                        <User size={32} color="#93c5fd" />
+                                    </div>
+                                )}
                             </div>
                         ))}
                         {isLoading && (
                             <div className="message bot loading w-full flex justify-start">
-                                <div className="max-w-[80%] bg-[#232946] text-[#aeb8fe] rounded-2xl px-6 py-4 text-lg shadow-md">
+                                <div className="max-w-[80%] bg-[#232946] text-[#93c5fd] rounded-2xl px-6 py-4 text-lg shadow-md">
                                     <div className="flex gap-1.5">
-                                        <span className="w-2.5 h-2.5 bg-[#3b82f6] rounded-full inline-block animate-pulse"></span>
-                                        <span className="w-2.5 h-2.5 bg-[#3b82f6] rounded-full inline-block animate-pulse delay-150"></span>
-                                        <span className="w-2.5 h-2.5 bg-[#3b82f6] rounded-full inline-block animate-pulse delay-300"></span>
+                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse"></span>
+                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-150"></span>
+                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-300"></span>
                                     </div>
                                 </div>
                             </div>
@@ -139,15 +155,15 @@ const ChatPage = () => {
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             placeholder={`Ask me anything...`}
-                            className="chat-input flex-1 px-5 py-3.5 rounded-xl border-none text-lg bg-[#181A20] text-[#aeb8fe] outline-none shadow-sm"
+                            className="chat-input flex-1 px-5 py-3.5 rounded-xl border-none text-lg bg-[#181A20] text-[#93c5fd] outline-none shadow-sm"
                             disabled={isLoading}
                         />
                         <button
                             type="submit"
-                            className={`send-btn px-7 rounded-xl bg-gradient-to-r from-[#3b82f6] to-[#aeb8fe] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 ${!inputValue.trim() || isLoading ? 'scale-100' : 'scale-105'} ${isLoading ? 'cursor-not-allowed' : ''}`}
+                            className={`send-btn px-7 rounded-xl bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 flex items-center justify-center ${!inputValue.trim() || isLoading ? 'scale-100' : 'scale-105'} ${isLoading ? 'cursor-not-allowed' : ''}`}
                             disabled={!inputValue.trim() || isLoading}
                         >
-                            Send
+                            <ArrowUpRight size={28} style={{ color: '#181A20' }} />
                         </button>
                     </div>
                     <div className="w-full flex gap-2.5 justify-center mt-0">
@@ -158,9 +174,9 @@ const ChatPage = () => {
                                     key={cat.id}
                                     type="button"
                                     onClick={() => setSelectedCategory(cat.id)}
-                                    className={`flex items-center gap-2.5 rounded-lg px-4 py-2 font-medium text-base border-none cursor-pointer transition-all duration-200 ${selectedCategory === cat.id ? 'bg-gradient-to-r from-[#3b82f6] to-[#aeb8fe] text-[#181A20] font-bold shadow-md' : 'bg-[#181A20] text-[#aeb8fe]'}`}
+                                    className={`flex items-center gap-2.5 rounded-lg px-4 py-2 font-medium text-base border-none cursor-pointer transition-all duration-200 ${selectedCategory === cat.id ? 'bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md' : 'bg-[#181A20] text-[#93c5fd]'}`}
                                 >
-                                    <IconComp size={20} style={{ color: selectedCategory === cat.id ? '#181A20' : '#aeb8fe' }} />
+                                    <IconComp size={20} style={{ color: selectedCategory === cat.id ? '#181A20' : '#93c5fd' }} />
                                     <span>{cat.label}</span>
                                 </button>
                             );
