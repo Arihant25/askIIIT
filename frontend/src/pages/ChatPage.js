@@ -38,21 +38,6 @@ const ChatPage = () => {
     }, []);
 
     useEffect(() => {
-        if (messages.length === 0) {
-            const selectedCatObj = categories.find(cat => cat.id === selectedCategory);
-            setMessages([
-                {
-                    id: Date.now(),
-                    type: 'bot',
-                    content: `Hello! Select a category below and ask your question. I'll answer using official college documents.`,
-                    timestamp: new Date(),
-                    sources: selectedCatObj ? selectedCatObj.sources : []
-                }
-            ]);
-        }
-    }, [messages.length, selectedCategory]);
-
-    useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
@@ -148,16 +133,14 @@ const ChatPage = () => {
                 </h1>
                 {/* Backend status indicator */}
                 {chatStarted && (
-                    <div className={`flex items-center gap-2 text-sm ${
-                        backendStatus === 'connected' ? 'text-green-400' : 
-                        backendStatus === 'disconnected' ? 'text-red-400' : 'text-yellow-400'
-                    }`}>
-                        <div className={`w-2 h-2 rounded-full ${
-                            backendStatus === 'connected' ? 'bg-green-400' : 
-                            backendStatus === 'disconnected' ? 'bg-red-400' : 'bg-yellow-400'
-                        }`}></div>
-                        {backendStatus === 'connected' ? 'Connected' : 
-                         backendStatus === 'disconnected' ? 'Backend Offline' : 'Checking...'}
+                    <div className={`flex items-center gap-2 text-sm ${backendStatus === 'connected' ? 'text-green-400' :
+                            backendStatus === 'disconnected' ? 'text-red-400' : 'text-yellow-400'
+                        }`}>
+                        <div className={`w-2 h-2 rounded-full ${backendStatus === 'connected' ? 'bg-green-400' :
+                                backendStatus === 'disconnected' ? 'bg-red-400' : 'bg-yellow-400'
+                            }`}></div>
+                        {backendStatus === 'connected' ? 'Connected' :
+                            backendStatus === 'disconnected' ? 'Backend Offline' : 'Checking...'}
                     </div>
                 )}
             </div>
@@ -180,11 +163,19 @@ const ChatPage = () => {
                                 <div
                                     className={`max-w-[80%] rounded-2xl my-2 px-6 py-4 text-lg shadow-md whitespace-pre-line break-words ${message.type === 'user'
                                         ? 'bg-[#60a5fa] text-[#181A20]'
-                                        : message.isError 
-                                        ? 'bg-red-500 text-white'
-                                        : 'bg-[#93c5fd] text-[#232946]'
+                                        : message.isError
+                                            ? 'bg-red-500 text-white'
+                                            : 'bg-[#93c5fd] text-[#232946]'
                                         }`}
                                 >
+
+                                    {isLoading && (message.type === 'bot') && (
+                                        <div className="flex gap-1.5">
+                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse"></span>
+                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-150"></span>
+                                            <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-300"></span>
+                                        </div>
+                                    )}
                                     {message.content}
                                     {/* Show sources if available */}
                                     {message.type === 'bot' && message.sources && message.sources.length > 0 && (
@@ -205,17 +196,6 @@ const ChatPage = () => {
                                 )}
                             </div>
                         ))}
-                        {isLoading && (
-                            <div className="message bot loading w-full flex justify-start">
-                                <div className="max-w-[80%] bg-[#232946] text-[#93c5fd] rounded-2xl px-6 py-4 text-lg shadow-md">
-                                    <div className="flex gap-1.5">
-                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse"></span>
-                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-150"></span>
-                                        <span className="w-2.5 h-2.5 bg-[#60a5fa] rounded-full inline-block animate-pulse delay-300"></span>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                         <div ref={messagesEndRef} />
                     </div>
                 )}

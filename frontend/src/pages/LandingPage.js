@@ -50,30 +50,13 @@ const ModernLandingPage = () => {
     ];
 
     return (
-        <div className="min-h-screen w-screen bg-[#181A20] flex flex-col relative overflow-hidden">
+        <div className="min-h-screen w-screen bg-[#181A20] flex flex-col relative overflow-y-auto hide-scrollbar">
             {/* Animated background elements - subtle blue gradients */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute -top-32 -right-32 w-96 h-96 bg-[#60a5fa] rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse"></div>
                 <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-[#93c5fd] rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse delay-1000"></div>
                 <div className="absolute top-1/2 left-1/2 w-72 h-72 bg-[#232946] rounded-full mix-blend-multiply filter blur-2xl opacity-10 animate-pulse delay-2000"></div>
             </div>
-
-            {/* Navigation */}
-            <nav className="relative z-10 p-6">
-                <div className="max-w-7xl mx-auto flex justify-between items-center">
-                    <div className="flex items-center space-x-2">
-                        <div className="w-8 h-8 bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] rounded-lg flex items-center justify-center">
-                            <Sparkles className="w-5 h-5 text-[#181A20]" />
-                        </div>
-                        <span className="text-2xl font-bold bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] bg-clip-text text-transparent">
-                            askIIIT
-                        </span>
-                    </div>
-                    <button className="px-4 py-2 text-[#93c5fd] hover:text-[#181A20] transition-colors border border-[#60a5fa] rounded-full hover:bg-[#60a5fa]/20">
-                        Login
-                    </button>
-                </div>
-            </nav>
 
             {/* Hero Section */}
             <div className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32">
@@ -99,11 +82,17 @@ const ModernLandingPage = () => {
 
                     {/* CTA Buttons */}
                     <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
-                        <button className="group px-8 py-4 bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] rounded-full text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform hover:scale-105 flex items-center">
+                        <button
+                            className="group px-8 py-4 bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] rounded-full text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform hover:scale-105 flex items-center"
+                            onClick={() => window.location.href = '/chat'}
+                        >
                             Start Chatting Now
                             <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                         </button>
-                        <button className="px-8 py-4 border-2 border-[#93c5fd]/20 rounded-full text-[#93c5fd] font-semibold text-lg backdrop-blur-sm hover:bg-[#93c5fd]/10 transition-all flex items-center">
+                        <button
+                            className="px-8 py-4 border-2 border-[#93c5fd]/20 rounded-full text-[#93c5fd] font-semibold text-lg backdrop-blur-sm hover:bg-[#93c5fd]/10 transition-all flex items-center"
+                            onClick={() => window.location.href = '/chat'}
+                        >
                             <MessageCircle className="w-5 h-5 mr-2" />
                             See How It Works
                         </button>
@@ -173,7 +162,10 @@ const ModernLandingPage = () => {
                 <div className="p-8 rounded-2xl bg-gradient-to-r from-[#60a5fa]/20 to-[#93c5fd]/20 border border-[#60a5fa]/30 backdrop-blur-sm">
                     <h2 className="text-3xl font-bold text-[#93c5fd] mb-4">Ready to Get Started?</h2>
                     <p className="text-[#93c5fd] mb-6">Join thousands of IIIT students getting instant answers</p>
-                    <button className="group px-8 py-4 bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] rounded-full font-bold text-lg border-none cursor-pointer shadow-md transition-transform hover:scale-105 flex items-center mx-auto">
+                    <button
+                        className="group px-8 py-4 bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] rounded-full font-bold text-lg border-none cursor-pointer shadow-md transition-transform hover:scale-105 flex items-center mx-auto"
+                        onClick={() => window.location.href = '/chat'}
+                    >
                         Launch askIIIT Chat
                         <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                     </button>

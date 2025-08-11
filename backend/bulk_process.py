@@ -1,5 +1,26 @@
 """
-Bulk document processing script for existing PDFs
+Bulk document processing s    # Initialize ChromaDB
+    try:
+        chroma_client = chromadb.PersistentClient(
+            path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
+        )
+        
+        # Create or get collections with manual embeddings (disable default embedding function)
+        # Use cosine similarity for better semantic search
+        documents_collection = chroma_client.get_or_create_collection(
+            name="documents",
+            embedding_function=None,  # Disable auto-embedding since we provide our own
+            metadata={"hnsw:space": "cosine"}
+        )
+        chunks_collection = chroma_client.get_or_create_collection(
+            name="chunks", 
+            embedding_function=None,  # Disable auto-embedding since we provide our own
+            metadata={"hnsw:space": "cosine"}
+        )
+        logger.info("ChromaDB initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize ChromaDB: {e}")
+        returnDFs
 """
 
 from colored_logging import setup_logging
@@ -33,10 +54,33 @@ async def process_existing_pdfs():
         chroma_client = chromadb.PersistentClient(
             path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
         )
+        
+        # Custom embedding function for ChromaDB
+        class CustomEmbeddingFunction:
+            def __init__(self):
+                from document_processor import DocumentProcessor
+                self.doc_processor = DocumentProcessor()
+            
+            def __call__(self, input):
+                if isinstance(input, str):
+                    input = [input]
+                embeddings = self.doc_processor.generate_embeddings(input)
+                return embeddings
+
+        # Initialize embedding function
+        embedding_function = CustomEmbeddingFunction()
+        
+        # Create or get collections with the custom embedding function
         documents_collection = chroma_client.get_or_create_collection(
-            name="documents")
+            name="documents",
+            embedding_function=embedding_function,
+            metadata={"hnsw:space": "cosine"}
+        )
         chunks_collection = chroma_client.get_or_create_collection(
-            name="chunks")
+            name="chunks", 
+            embedding_function=embedding_function,
+            metadata={"hnsw:space": "cosine"}
+        )
         logger.info("ChromaDB initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize ChromaDB: {e}")
@@ -132,8 +176,22 @@ def check_existing_documents():
         )
 
         try:
-            documents_collection = chroma_client.get_collection(
-                name="documents")
+            # Custom embedding function for ChromaDB
+            class CustomEmbeddingFunction:
+                def __init__(self):
+                    from document_processor import DocumentProcessor
+                    self.doc_processor = DocumentProcessor()
+                
+                def __call__(self, input):
+                    if isinstance(input, str):
+                        input = [input]
+                    embeddings = self.doc_processor.generate_embeddings(input)
+                    return embeddings
+
+            # Initialize embedding function
+            embedding_function = CustomEmbeddingFunction()
+            
+            documents_collection = chroma_client.get_collection(name="documents")
             doc_count = documents_collection.count()
             logger.info(f"Found {doc_count} existing documents in ChromaDB")
 
@@ -160,6 +218,60 @@ def check_existing_documents():
         logger.error(f"Error checking existing documents: {e}")
 
 
+def reset_collections():
+    """Reset ChromaDB collections to fix dimension mismatch"""
+    try:
+        chroma_client = chromadb.PersistentClient(
+            path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
+        )
+        
+        # Delete existing collections if they exist
+        try:
+            chroma_client.delete_collection(name="documents")
+            logger.info("Deleted existing documents collection")
+        except Exception:
+            logger.info("No existing documents collection to delete")
+            
+        try:
+            chroma_client.delete_collection(name="chunks")
+            logger.info("Deleted existing chunks collection")
+        except Exception:
+            logger.info("No existing chunks collection to delete")
+            
+        # Custom embedding function for ChromaDB
+        class CustomEmbeddingFunction:
+            def __init__(self):
+                from document_processor import DocumentProcessor
+                self.doc_processor = DocumentProcessor()
+            
+            def __call__(self, input):
+                if isinstance(input, str):
+                    input = [input]
+                embeddings = self.doc_processor.generate_embeddings(input)
+                return embeddings
+
+        # Initialize embedding function
+        embedding_function = CustomEmbeddingFunction()
+            
+        # Create new collections with correct settings
+        documents_collection = chroma_client.create_collection(
+            name="documents",
+            embedding_function=embedding_function,
+            metadata={"hnsw:space": "cosine"}
+        )
+        chunks_collection = chroma_client.create_collection(
+            name="chunks",
+            embedding_function=embedding_function,
+            metadata={"hnsw:space": "cosine"}
+        )
+        
+        logger.info("Created new collections with correct embedding function")
+        
+    except Exception as e:
+        logger.error(f"Error resetting collections: {e}")
+        raise
+
+
 def main():
     """Main function"""
     import argparse
@@ -168,8 +280,8 @@ def main():
     parser.add_argument(
         "--check", action="store_true", help="Check existing documents only"
     )
-    parser.add_argument("--process", action="store_true",
-                        help="Process all PDFs")
+    parser.add_argument("--process", action="store_true", help="Process all PDFs")
+    parser.add_argument("--reset", action="store_true", help="Reset ChromaDB collections to fix dimension issues")
 
     args = parser.parse_args()
 
@@ -177,10 +289,14 @@ def main():
         check_existing_documents()
     elif args.process:
         asyncio.run(process_existing_pdfs())
+    elif args.reset:
+        reset_collections()
+        logger.info("Collections reset complete. You can now run --process to add documents.")
     else:
         print("Usage:")
         print("  python bulk_process.py --check     # Check existing documents")
         print("  python bulk_process.py --process   # Process all PDFs")
+        print("  python bulk_process.py --reset     # Reset collections to fix dimension issues")
 
 
 if __name__ == "__main__":

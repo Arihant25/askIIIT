@@ -257,7 +257,7 @@ class DocumentProcessor:
                 metadatas=chunk_metadatas,
             )
 
-            # Store document metadata
+            # Store document metadata (no embedding needed for documents collection)
             doc_metadata = {
                 "doc_id": doc_id,
                 "name": filename,
@@ -270,9 +270,13 @@ class DocumentProcessor:
                 "updated_at": datetime.now().isoformat(),
             }
 
+            # Create a dummy embedding for the document (ChromaDB requires it)
+            dummy_embedding = [0.0] * len(embeddings[0]) if embeddings else [0.0] * 384
+
             documents_collection.add(
                 ids=[doc_id],
                 documents=[text[:1000]],  # Store first 1000 chars as summary
+                embeddings=[dummy_embedding],  # Provide dummy embedding
                 metadatas=[doc_metadata],
             )
 

@@ -177,13 +177,37 @@ async def get_admin_user(
     return current_user
 
 
+# Custom embedding function for ChromaDB
+class CustomEmbeddingFunction:
+    def __init__(self):
+        from document_processor import DocumentProcessor
+        self.doc_processor = DocumentProcessor()
+    
+    def __call__(self, input):
+        if isinstance(input, str):
+            input = [input]
+        embeddings = self.doc_processor.generate_embeddings(input)
+        return embeddings
+
+# Initialize embedding function
+try:
+    embedding_function = CustomEmbeddingFunction()
+    logger.info("Custom embedding function initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize embedding function: {e}")
+    embedding_function = None
+
 # Initialize ChromaDB collections
 try:
     documents_collection = chroma_client.get_or_create_collection(
-        name="documents", metadata={"description": "Document metadata collection"}
+        name="documents", 
+        embedding_function=embedding_function,
+        metadata={"description": "Document metadata collection", "hnsw:space": "cosine"}
     )
     chunks_collection = chroma_client.get_or_create_collection(
-        name="chunks", metadata={"description": "Document chunks with embeddings"}
+        name="chunks", 
+        embedding_function=embedding_function,
+        metadata={"description": "Document chunks with embeddings", "hnsw:space": "cosine"}
     )
     logger.info("ChromaDB collections initialized successfully")
 except Exception as e:
@@ -522,7 +546,7 @@ async def chat_with_documents(chat_request: ChatRequest):
             "context_chunks": context_info,
             "context_found": len(context_chunks) > 0,
             "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
-            "model_used": "qwen3:0.6B",
+            "model_used": ollama_client.chat_model,
         }
 
     except Exception as e:
@@ -593,7 +617,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
                 "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
                 "context_chunks": context_info,
                 "context_found": len(context_chunks) > 0,
-                "model_used": "qwen3:0.6b",
+                "model_used": ollama_client.chat_model,
             }
             yield f"data: {json.dumps(metadata_response)}\n\n"
 
