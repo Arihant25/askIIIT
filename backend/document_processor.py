@@ -4,54 +4,98 @@ Document processing utilities for extracting text and creating embeddings
 
 import os
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
+import numpy as np
 from datetime import datetime
 import uuid
 import pdfplumber
+
+# Suppress pdfminer warnings about invalid color patterns
+logging.getLogger('pdfminer.pdfinterp').setLevel(logging.ERROR)
 import io
 from sentence_transformers import SentenceTransformer
 import chromadb
 import torch
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
 
 class DocumentProcessor:
-    def __init__(self, embedding_model_name: Optional[str] = None):
-        """Initialize document processor with Qwen3 embedding model"""
+    def __init__(self, embedding_model_name: Optional[str] = None, max_workers: Optional[int] = None):
+        """Initialize document processor with Qwen3 embedding model and threading support"""
         try:
             model_name = embedding_model_name or os.getenv(
-                "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"
-            )
-            # Use CUDA if available, otherwise CPU
-            # device = "cuda" if torch.cuda.is_available() else "cpu"
-            device = "cpu" # Force CPU for larger RAM
-            trust_remote_code = (
-                os.getenv("EMBEDDING_TRUST_REMOTE_CODE", "true").lower() == "true"
+                "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"
             )
 
-            logger.info(f"Loading embedding model: {model_name} on device: {device}")
+            # Detect best available device: MPS > CUDA > CPU
+            if torch.backends.mps.is_available():
+                device = "mps"
+                logger.info(
+                    "Using Metal Performance Shaders (MPS) for acceleration")
+            elif torch.cuda.is_available():
+                device = "cuda"
+                logger.info("Using CUDA for acceleration")
+            else:
+                device = "cpu"
+                logger.info("Using CPU (no hardware acceleration available)")
+
+            trust_remote_code = (
+                os.getenv("EMBEDDING_TRUST_REMOTE_CODE",
+                          "true").lower() == "true"
+            )
+
+            # Set up thread pool for parallel processing
+            self.max_workers = max_workers or min(
+                32, (os.cpu_count() or 1) + 4)
+            self._lock = threading.Lock()
+
+            logger.info(
+                f"Loading embedding model: {model_name} on device: {device}")
             self.embedding_model = SentenceTransformer(
                 model_name, device=device, trust_remote_code=trust_remote_code
             )
-            logger.info(f"Successfully loaded Qwen-based embedding model: {model_name}")
+            logger.info(
+                f"Successfully loaded Qwen-based embedding model: {model_name}")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
 
+    def _extract_page_text(self, page) -> str:
+        """Extract text from a single PDF page"""
+        try:
+            return page.extract_text() or ""
+        except Exception as e:
+            logger.error(f"Error extracting text from page: {e}")
+            return ""
+
     def extract_text_from_pdf(self, file_content: bytes) -> str:
-        """Extract text from PDF file content using pdfplumber"""
+        """Extract text from PDF file content using pdfplumber with parallel processing"""
         try:
             pdf_file = io.BytesIO(file_content)
-            text = ""
 
             with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
+                # For small PDFs, use sequential processing
+                if len(pdf.pages) <= 5:
+                    text = ""
+                    for page in pdf.pages:
+                        page_text = self._extract_page_text(page)
+                        if page_text:
+                            text += page_text + "\n"
+                    return text.strip()
 
-            return text.strip()
+                # For larger PDFs, use parallel processing
+                with ThreadPoolExecutor(max_workers=min(self.max_workers, len(pdf.pages))) as executor:
+                    page_texts = list(executor.map(
+                        self._extract_page_text, pdf.pages))
+
+                text = "\n".join(
+                    page_text for page_text in page_texts if page_text)
+                return text.strip()
+
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {e}")
             raise
@@ -78,7 +122,7 @@ class DocumentProcessor:
         chunks = []
 
         for i in range(0, len(words), chunk_size - overlap):
-            chunk_words = words[i : i + chunk_size]
+            chunk_words = words[i: i + chunk_size]
             chunk_text = " ".join(chunk_words)
             chunks.append(chunk_text)
 
@@ -88,30 +132,67 @@ class DocumentProcessor:
 
         return chunks
 
+    def _process_embedding_batch(self, texts_batch: List[str]) -> List[List[float]]:
+        """Process a batch of texts for embedding generation"""
+        try:
+            with self._lock:  # Ensure thread-safe access to the model
+                embeddings = self.embedding_model.encode(
+                    texts_batch,
+                    convert_to_tensor=False,
+                    show_progress_bar=False,
+                    batch_size=8,  # Smaller batch size for threading
+                    normalize_embeddings=True,
+                )
+
+                # Convert to list if numpy array
+                if hasattr(embeddings, "tolist"):
+                    return embeddings.tolist()
+
+                return list(embeddings)
+        except Exception as e:
+            logger.error(f"Error in batch embedding generation: {e}")
+            raise
+
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts using Qwen3-Embedding-8B"""
+        """Generate embeddings for a list of texts using Qwen3-Embedding-0.6B with parallel processing"""
         try:
             logger.info(
-                f"Generating embeddings for {len(texts)} texts using Qwen3-Embedding-8B"
+                f"Generating embeddings for {len(texts)} texts using Qwen3-Embedding-0.6B"
             )
 
-            # Generate embeddings using sentence-transformers
-            embeddings = self.embedding_model.encode(
-                texts,
-                convert_to_tensor=False,
-                show_progress_bar=len(texts) > 10,
-                batch_size=32,  # Adjust based on your GPU memory
-                normalize_embeddings=True,  # Normalize for better similarity search
-            )
+            # For small batches, use sequential processing
+            if len(texts) <= 16:
+                embeddings = self.embedding_model.encode(
+                    texts,
+                    convert_to_tensor=False,
+                    show_progress_bar=len(texts) > 10,
+                    batch_size=32,
+                    normalize_embeddings=True,
+                )
 
-            # Convert to list if numpy array
-            if hasattr(embeddings, "tolist"):
-                embeddings = embeddings.tolist()
+                if hasattr(embeddings, "tolist"):
+                    return embeddings.tolist()
+
+                return list(embeddings)
+
+            # For larger batches, use parallel processing
+            batch_size = 16
+            text_batches = [texts[i:i + batch_size]
+                            for i in range(0, len(texts), batch_size)]
+
+            all_embeddings = []
+            with ThreadPoolExecutor(max_workers=min(self.max_workers // 2, len(text_batches))) as executor:
+                future_to_batch = {executor.submit(self._process_embedding_batch, batch): batch
+                                   for batch in text_batches}
+
+                for future in as_completed(future_to_batch):
+                    batch_embeddings = future.result()
+                    all_embeddings.extend(batch_embeddings)
 
             logger.info(
-                f"Successfully generated embeddings with dimension: {len(embeddings[0]) if embeddings else 0}"
+                f"Successfully generated embeddings with dimension: {len(all_embeddings[0]) if all_embeddings else 0}"
             )
-            return embeddings
+            return all_embeddings
 
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
@@ -222,7 +303,8 @@ class DocumentSummarizer:
             self.ollama_client = ollama_client
             logger.info("Initialized document summarizer with Ollama client")
         except Exception as e:
-            logger.error(f"Failed to initialize Ollama client for summarization: {e}")
+            logger.error(
+                f"Failed to initialize Ollama client for summarization: {e}")
             self.ollama_client = None
 
     async def generate_summary_async(self, text: str, max_length: int = 200) -> str:
@@ -238,16 +320,26 @@ class DocumentSummarizer:
             return self._fallback_summary(text, max_length)
 
     def generate_summary(self, text: str, max_length: int = 200) -> str:
-        """Synchronous wrapper for generate_summary_async"""
+        """Generate summary with proper async context handling"""
         try:
             import asyncio
+            from concurrent.futures import ThreadPoolExecutor
 
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(
-                self.generate_summary_async(text, max_length)
-            )
+            try:
+                # Try to get the current event loop
+                asyncio.get_running_loop()
+                # If there's a running loop, we need to run the async function in a thread
+                with ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self.generate_summary_async(text, max_length)
+                    )
+                    return future.result()
+            except RuntimeError:
+                # No running event loop, safe to create a new one
+                return asyncio.run(self.generate_summary_async(text, max_length))
         except Exception as e:
-            logger.error(f"Error in synchronous summary generation: {e}")
+            logger.error(f"Error in summary generation: {e}")
             return self._fallback_summary(text, max_length)
 
     def _fallback_summary(self, text: str, max_length: int = 200) -> str:
@@ -273,16 +365,26 @@ class DocumentSummarizer:
             return self._fallback_categorization(filename, text)
 
     def categorize_document(self, filename: str, text: str) -> str:
-        """Synchronous wrapper for categorize_document_async"""
+        """Categorize document with proper async context handling"""
         try:
             import asyncio
+            from concurrent.futures import ThreadPoolExecutor
 
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(
-                self.categorize_document_async(filename, text)
-            )
+            try:
+                # Try to get the current event loop
+                asyncio.get_running_loop()
+                # If there's a running loop, we need to run the async function in a thread
+                with ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run,
+                        self.categorize_document_async(filename, text)
+                    )
+                    return future.result()
+            except RuntimeError:
+                # No running event loop, safe to create a new one
+                return asyncio.run(self.categorize_document_async(filename, text))
         except Exception as e:
-            logger.error(f"Error in synchronous categorization: {e}")
+            logger.error(f"Error in categorization: {e}")
             return self._fallback_categorization(filename, text)
 
     def _fallback_categorization(self, filename: str, text: str) -> str:

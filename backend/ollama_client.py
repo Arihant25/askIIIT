@@ -17,7 +17,7 @@ class OllamaClient:
         self.base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL", "http://localhost:11434"
         )
-        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:8b")
+        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:0.6B")
         self.timeout = httpx.Timeout(300.0)  # 5 minutes for long operations
 
     async def check_connection(self) -> bool:
@@ -60,17 +60,21 @@ class OllamaClient:
                     "POST", f"{self.base_url}/api/pull", json={"name": model_name}
                 ) as response:
                     response.raise_for_status()
+                    last_status = ""
                     async for line in response.aiter_lines():
                         if line:
                             try:
                                 data = json.loads(line)
                                 if "status" in data:
-                                    logger.info(f"Pull status: {data['status']}")
-                                if data.get("status") == "success":
-                                    logger.info(
-                                        f"Model {model_name} pulled successfully"
-                                    )
-                                    return True
+                                    current_status = data['status']
+                                    # Only log when status changes to reduce spam
+                                    if current_status != last_status:
+                                        logger.info(f"Pull status: {current_status}")
+                                        last_status = current_status
+                                    
+                                    if current_status == "success":
+                                        logger.info(f"Model {model_name} pulled successfully")
+                                        return True
                             except json.JSONDecodeError:
                                 continue
 
@@ -99,7 +103,8 @@ class OllamaClient:
 
             if context:
                 full_prompt += "Context:\n"
-                for i, ctx in enumerate(context[:5]):  # Limit to 5 context chunks
+                # Limit to 5 context chunks
+                for i, ctx in enumerate(context[:5]):
                     full_prompt += f"{i+1}. {ctx}\n"
                 full_prompt += "\n"
 
@@ -188,7 +193,8 @@ class OllamaClient:
 
             # Clean and validate category
             category = category.lower().strip()
-            valid_categories = ["faculty", "student", "hostel", "academics", "mess"]
+            valid_categories = ["faculty", "student",
+                                "hostel", "academics", "mess"]
 
             if category in valid_categories:
                 return category

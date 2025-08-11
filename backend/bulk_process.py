@@ -2,6 +2,9 @@
 Bulk document processing script for existing PDFs
 """
 
+from colored_logging import setup_logging
+from dotenv import load_dotenv
+from document_processor import DocumentProcessor, DocumentSummarizer
 import asyncio
 import os
 import sys
@@ -13,15 +16,12 @@ import chromadb
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
-from document_processor import DocumentProcessor, DocumentSummarizer
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -33,8 +33,10 @@ async def process_existing_pdfs():
         chroma_client = chromadb.PersistentClient(
             path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
         )
-        documents_collection = chroma_client.get_or_create_collection(name="documents")
-        chunks_collection = chroma_client.get_or_create_collection(name="chunks")
+        documents_collection = chroma_client.get_or_create_collection(
+            name="documents")
+        chunks_collection = chroma_client.get_or_create_collection(
+            name="chunks")
         logger.info("ChromaDB initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize ChromaDB: {e}")
@@ -88,9 +90,11 @@ async def process_existing_pdfs():
                     pdf_file.name, sample_text[:1000]
                 )
                 description = summarizer.generate_summary(sample_text[:2000])
-                logger.info(f"Auto-categorized {pdf_file.name} as '{category}'")
+                logger.info(
+                    f"Auto-categorized {pdf_file.name} as '{category}'")
             except Exception as e:
-                logger.warning(f"Could not auto-categorize {pdf_file.name}: {e}")
+                logger.warning(
+                    f"Could not auto-categorize {pdf_file.name}: {e}")
                 category = "academics"  # Default category
                 description = f"Document: {pdf_file.name}"
 
@@ -128,7 +132,8 @@ def check_existing_documents():
         )
 
         try:
-            documents_collection = chroma_client.get_collection(name="documents")
+            documents_collection = chroma_client.get_collection(
+                name="documents")
             doc_count = documents_collection.count()
             logger.info(f"Found {doc_count} existing documents in ChromaDB")
 
@@ -163,7 +168,8 @@ def main():
     parser.add_argument(
         "--check", action="store_true", help="Check existing documents only"
     )
-    parser.add_argument("--process", action="store_true", help="Process all PDFs")
+    parser.add_argument("--process", action="store_true",
+                        help="Process all PDFs")
 
     args = parser.parse_args()
 

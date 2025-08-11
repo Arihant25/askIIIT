@@ -2,6 +2,7 @@
 Startup script for askIIIT backend
 """
 
+from colored_logging import setup_logging
 import asyncio
 import os
 import sys
@@ -12,9 +13,8 @@ from pathlib import Path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +65,8 @@ def check_dependencies():
             missing_packages.append(package)
 
     if missing_packages:
-        logger.error(f"Missing required packages: {', '.join(missing_packages)}")
+        logger.error(
+            f"Missing required packages: {', '.join(missing_packages)}")
         logger.error(
             "Please install dependencies using: pip install -r requirements.txt"
         )
@@ -96,7 +97,8 @@ def main():
 
     logger.info(f"Starting server on {host}:{port} (debug={debug})")
 
-    uvicorn.run("main:app", host=host, port=port, reload=debug, log_level="info")
+    uvicorn.run("main:app", host=host, port=port,
+                reload=debug, log_level="info")
 
 
 if __name__ == "__main__":

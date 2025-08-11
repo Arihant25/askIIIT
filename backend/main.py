@@ -1,3 +1,4 @@
+from colored_logging import setup_logging
 from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -18,8 +19,9 @@ import json
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure colored logging
+
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -31,7 +33,8 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://your-frontend-domain.com"],
+    allow_origins=["http://localhost:3000",
+                   "https://your-frontend-domain.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -115,7 +118,8 @@ async def validate_cas_token(ticket: str, service_url: str) -> Optional[UserInfo
             if "cas:authenticationSuccess" in response.text:
                 # Extract username from CAS response
                 # This is a simplified extraction - you should use proper XML parsing
-                username = response.text.split("<cas:user>")[1].split("</cas:user>")[0]
+                username = response.text.split("<cas:user>")[
+                    1].split("</cas:user>")[0]
 
                 # Check if user is admin
                 admin_users = os.getenv("ADMIN_USERS", "").split(",")
@@ -168,7 +172,8 @@ async def get_admin_user(
 ) -> UserInfo:
     """Ensure current user is an admin"""
     if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
+        raise HTTPException(
+            status_code=403, detail="Admin privileges required")
     return current_user
 
 
@@ -253,7 +258,7 @@ async def health_check():
             health_status["services"]["embeddings"] = {
                 "status": "healthy",
                 "model": os.getenv(
-                    "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"
+                    "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"
                 ),
                 "embedding_dimension": (
                     len(test_embeddings[0]) if test_embeddings else 0
@@ -362,7 +367,8 @@ async def upload_document(
             chunks_collection=chunks_collection,
         )
 
-        logger.info(f"Document {file.filename} processed successfully: {result}")
+        logger.info(
+            f"Document {file.filename} processed successfully: {result}")
 
         return {
             "message": "Document uploaded and processed successfully",
@@ -405,7 +411,8 @@ async def list_documents(
         }
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve documents")
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve documents")
 
 
 @app.post("/api/search")
@@ -515,7 +522,7 @@ async def chat_with_documents(chat_request: ChatRequest):
             "context_chunks": context_info,
             "context_found": len(context_chunks) > 0,
             "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
-            "model_used": "qwen3:8b",
+            "model_used": "qwen3:0.6B",
         }
 
     except Exception as e:
@@ -541,7 +548,7 @@ async def chat_with_documents(chat_request: ChatRequest):
 @app.post("/api/chat/stream")
 async def chat_with_documents_stream(chat_request: ChatRequest):
     """Streaming chat interface with document context using Qwen - No authentication required"""
-    
+
     async def generate_response():
         try:
             # Import Ollama client
@@ -559,10 +566,12 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             )
 
             context_chunks = (
-                search_results["documents"][0] if search_results["documents"] else []
+                search_results["documents"][0] if search_results["documents"] else [
+                ]
             )
             context_metadata = (
-                search_results["metadatas"][0] if search_results["metadatas"] else []
+                search_results["metadatas"][0] if search_results["metadatas"] else [
+                ]
             )
 
             # Send context information first

@@ -3,6 +3,7 @@ Setup script for askIIIT backend
 This script helps with initial setup and model installation
 """
 
+from colored_logging import setup_logging
 import asyncio
 import os
 import sys
@@ -14,16 +15,16 @@ from pathlib import Path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+
+setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 async def check_ollama_installation():
     """Check if Ollama is installed and running"""
     try:
-        result = subprocess.run(["ollama", "version"], capture_output=True, text=True)
+        result = subprocess.run(["ollama", "version"],
+                                capture_output=True, text=True)
         if result.returncode == 0:
             logger.info(f"Ollama is installed: {result.stdout.strip()}")
             return True
@@ -80,7 +81,8 @@ async def test_embedding_model():
         from document_processor import DocumentProcessor
 
         # Initialize processor (this will download the model if needed)
-        logger.info("Initializing DocumentProcessor with Qwen-based embedding model...")
+        logger.info(
+            "Initializing DocumentProcessor with Qwen-based embedding model...")
         doc_processor = DocumentProcessor()
 
         # Test embedding generation
@@ -115,8 +117,10 @@ async def setup_chromadb():
         )
 
         # Create collections
-        documents_collection = chroma_client.get_or_create_collection(name="documents")
-        chunks_collection = chroma_client.get_or_create_collection(name="chunks")
+        documents_collection = chroma_client.get_or_create_collection(
+            name="documents")
+        chunks_collection = chroma_client.get_or_create_collection(
+            name="chunks")
 
         logger.info("✓ ChromaDB setup complete!")
         logger.info(f"  - Documents: {documents_collection.count()}")
@@ -140,7 +144,8 @@ def install_dependencies():
 
     try:
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(requirements_file)],
+            [sys.executable, "-m", "pip", "install",
+                "-r", str(requirements_file)],
             check=True,
         )
         logger.info("✓ Dependencies installed successfully!")
@@ -170,7 +175,8 @@ async def run_comprehensive_test():
 
         # Test embeddings
         embeddings = doc_processor.generate_embeddings(chunks)
-        logger.info(f"✓ Embedding generation: {len(embeddings)} embeddings created")
+        logger.info(
+            f"✓ Embedding generation: {len(embeddings)} embeddings created")
 
         # Test summarization
         summary = summarizer.generate_summary(test_text)
@@ -215,7 +221,7 @@ async def main():
     if not await setup_ollama_models():
         logger.warning("Ollama setup failed - chat functionality may not work")
         logger.warning(
-            "To fix: Install Ollama and run 'ollama serve', then 'ollama pull qwen3:8b'"
+            "To fix: Install Ollama and run 'ollama serve', then 'ollama pull qwen3:0.6B'"
         )
 
     # Step 5: Run comprehensive test
