@@ -2,5 +2,8 @@ pdfs
 embeddings
 faiss_index.bin
 faiss_index.meta
+chroma_data
+__pycache__
+.env
 
 backend/venv

@@ -11,6 +11,7 @@ import pdfplumber
 import io
 from sentence_transformers import SentenceTransformer
 import chromadb
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,14 @@ class DocumentProcessor:
             model_name = embedding_model_name or os.getenv(
                 "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-8B"
             )
-            device = os.getenv("EMBEDDING_DEVICE", "auto")
+            # Use CUDA if available, otherwise CPU
+            # device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cpu" # Force CPU for larger RAM
             trust_remote_code = (
                 os.getenv("EMBEDDING_TRUST_REMOTE_CODE", "true").lower() == "true"
             )
 
-            logger.info(f"Loading embedding model: {model_name}")
+            logger.info(f"Loading embedding model: {model_name} on device: {device}")
             self.embedding_model = SentenceTransformer(
                 model_name, device=device, trust_remote_code=trust_remote_code
             )

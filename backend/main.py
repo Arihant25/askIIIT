@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import chromadb
 from chromadb.config import Settings
 import os
@@ -13,6 +13,7 @@ import uuid
 import httpx
 from urllib.parse import urlencode, quote
 import logging
+import json
 
 # Load environment variables
 load_dotenv()
@@ -448,10 +449,8 @@ async def search_documents(
 
 
 @app.post("/api/chat")
-async def chat_with_documents(
-    chat_request: ChatRequest, current_user: UserInfo = Depends(get_current_user)
-):
-    """Chat interface with document context using Qwen3"""
+async def chat_with_documents(chat_request: ChatRequest):
+    """Chat interface with document context using Qwen3 - No authentication required"""
     try:
         # Import Ollama client
         from ollama_client import ollama_client
@@ -525,7 +524,7 @@ async def chat_with_documents(
         # Fallback response
         fallback_response = (
             "I apologize, but I'm having trouble processing your request right now. "
-            "This might be because the Qwen3 model is not available or there's a connection issue. "
+            "This might be because the Qwen model is not available or there's a connection issue. "
             "Please try again later or contact support if the problem persists."
         )
 
@@ -537,6 +536,109 @@ async def chat_with_documents(
             "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
             "error": str(e),
         }
+
+
+@app.post("/api/chat/stream")
+async def chat_with_documents_stream(chat_request: ChatRequest):
+    """Streaming chat interface with document context using Qwen - No authentication required"""
+    
+    async def generate_response():
+        try:
+            # Import Ollama client
+            from ollama_client import ollama_client
+
+            # First, search for relevant documents
+            where_clause = {}
+            if chat_request.category:
+                where_clause["category"] = chat_request.category
+
+            search_results = chunks_collection.query(
+                query_texts=[chat_request.message],
+                n_results=5,
+                where=where_clause if where_clause else None,
+            )
+
+            context_chunks = (
+                search_results["documents"][0] if search_results["documents"] else []
+            )
+            context_metadata = (
+                search_results["metadatas"][0] if search_results["metadatas"] else []
+            )
+
+            # Send context information first
+            context_info = []
+            for chunk, metadata in zip(context_chunks, context_metadata):
+                context_info.append(
+                    {
+                        "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
+                        "filename": metadata.get("filename", "Unknown"),
+                        "category": metadata.get("category", "Unknown"),
+                        "doc_id": metadata.get("doc_id", ""),
+                        "relevance_score": 1.0,
+                    }
+                )
+
+            # Send metadata first
+            metadata_response = {
+                "type": "metadata",
+                "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
+                "context_chunks": context_info,
+                "context_found": len(context_chunks) > 0,
+                "model_used": "qwen3:0.6b",
+            }
+            yield f"data: {json.dumps(metadata_response)}\n\n"
+
+            # Generate and stream response
+            system_prompt = (
+                "You are askIIIT, a helpful assistant for IIIT Hyderabad. "
+                "You help students, faculty, and staff find information from official documents. "
+                "Use the provided context to answer questions accurately. "
+                "If you cannot find relevant information in the context, say so politely. "
+                "Always be helpful, concise, and reference the source documents when applicable."
+            )
+
+            # Stream response from Ollama
+            if context_chunks:
+                response = await ollama_client.generate_response(
+                    prompt=chat_request.message,
+                    context=context_chunks,
+                    system_prompt=system_prompt,
+                )
+            else:
+                response = await ollama_client.generate_response(
+                    prompt=chat_request.message,
+                    system_prompt=system_prompt
+                    + " Note: No relevant documents were found for this query.",
+                )
+
+            # Send the response in chunks for streaming effect
+            chunk_size = 10  # Characters per chunk
+            for i in range(0, len(response), chunk_size):
+                chunk = response[i:i + chunk_size]
+                chunk_response = {
+                    "type": "content",
+                    "content": chunk,
+                    "is_final": i + chunk_size >= len(response)
+                }
+                yield f"data: {json.dumps(chunk_response)}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in streaming chat: {e}")
+            error_response = {
+                "type": "error",
+                "error": "I apologize, but I'm having trouble processing your request right now. Please try again later."
+            }
+            yield f"data: {json.dumps(error_response)}\n\n"
+
+    return StreamingResponse(
+        generate_response(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
 
 
 @app.get("/api/categories")

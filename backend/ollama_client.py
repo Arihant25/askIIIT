@@ -1,11 +1,5 @@
 """
-Ollama clclass OllamaClient:
-    def __init__(self, base_url: Optional[str] = None):
-        self.base_url = base_url or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:11434"
-        )
-        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:8b")
-        self.timeout = httpx.Timeout(300.0)  # 5 minutes for long operationsilities for Qwen 3 models
+Ollama client capabilities for Qwen models
 """
 
 import os

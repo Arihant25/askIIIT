@@ -1,0 +1,3 @@
+0. Store dates of pdf and author and other metadata in the database.
+1. Use nltk to tokenise better for embedding.
+2. Use numpy v<2

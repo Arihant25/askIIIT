@@ -52,10 +52,8 @@ def check_dependencies():
         "uvicorn",
         "chromadb",
         "pydantic",
-        "python-dotenv",
         "httpx",
         "sentence-transformers",
-        "PyPDF2",
     ]
 
     missing_packages = []
