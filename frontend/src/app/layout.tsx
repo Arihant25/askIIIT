@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "askIIIT",
+  title: "Jagruti",
   description: "Ask questions about IIIT documents and get instant answers",
   keywords: [
     "IIIT",
@@ -26,9 +26,9 @@ export const metadata: Metadata = {
     "search",
   ],
   openGraph: {
-    title: "askIIIT",
+    title: "Jagruti",
     description: "Ask questions about IIIT documents and get instant answers",
-    siteName: "askIIIT",
+    siteName: "Jagruti",
     locale: "en_US",
     type: "website",
   },

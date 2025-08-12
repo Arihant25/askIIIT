@@ -53,7 +53,7 @@ const Navbar = () => {
                 href="/"
                 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-[#93c5fd] to-[#60a5fa] bg-clip-text text-transparent mr-4"
               >
-                askIIIT
+                Jagruti
               </Link>
 
               {/* Status indicator moved here */}
