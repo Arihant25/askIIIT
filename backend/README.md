@@ -84,6 +84,7 @@ The system now includes smart filtering to ensure only relevant documents are sh
   - `0.9`: Lenient - includes more potentially relevant content
 
 Use the debug endpoint to test different threshold values:
+
 ```bash
 curl "http://localhost:8000/api/debug/search-relevance?query=your-test-query&threshold=0.6"
 ```
@@ -136,9 +137,10 @@ python bulk_process.py --process
 ### Search & Chat
 
 - `POST /api/search` - Semantic search using Qwen3 embeddings
-- `POST /api/chat` - Chat with document context using Qwen3
-- `POST /api/chat/stream` - Streaming chat with real-time responses
+- `POST /api/chat` - Chat with document context using Qwen3 (with conversation history)
+- `POST /api/chat/stream` - Streaming chat with real-time responses (with conversation history)
 - `GET /api/debug/search-relevance` - Debug search relevance filtering (requires authentication)
+- `POST /api/debug/test-conversation` - Debug conversation history handling
 
 ## Model Architecture
 
@@ -152,10 +154,11 @@ python bulk_process.py --process
 ### Chat Pipeline
 
 1. **Query Processing**: Convert user query to embedding using Qwen3-Embedding-8B
-2. **Similarity Search**: Find relevant chunks in ChromaDB
-3. **Context Preparation**: Format relevant chunks as context
-4. **Response Generation**: Qwen3 (8B) via Ollama generates response with context
-5. **Response**: Natural language answer with source references
+2. **Conversation Context**: Include previous messages from the conversation for continuity
+3. **Similarity Search**: Find relevant chunks in ChromaDB
+4. **Context Preparation**: Format relevant chunks and conversation history as context
+5. **Response Generation**: Qwen3 (8B) via Ollama generates response with full context
+6. **Response**: Natural language answer with source references and conversation memory
 
 ## API Documentation
 

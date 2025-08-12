@@ -19,6 +19,11 @@ interface StreamData {
   is_final?: boolean;
 }
 
+interface ChatMessage {
+  type: string;
+  content: string;
+}
+
 class ApiService {
   async sendChatMessageStream(
     message: string,
@@ -29,13 +34,15 @@ class ApiService {
       finalContent: string,
       finalMetadata: StreamData | null
     ) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    conversationHistory?: ChatMessage[]
   ) {
     try {
       const payload = {
         message,
         categories,
         conversation_id: conversationId,
+        conversation_history: conversationHistory,
       };
 
       const response = await fetch(API_ENDPOINTS.CHAT_STREAM, {

@@ -91,10 +91,16 @@ class QueryRequest(BaseModel):
     limit: Optional[int] = 10
 
 
+class ChatMessage(BaseModel):
+    type: str  # 'user' or 'bot'
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     categories: Optional[List[str]] = None
     conversation_id: Optional[str] = None
+    conversation_history: Optional[List[ChatMessage]] = None
 
 
 class UserInfo(BaseModel):
@@ -515,39 +521,46 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # Filter results by relevance score (distance threshold)
         # Lower distance = higher similarity
-        relevance_threshold = float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
-        
+        relevance_threshold = float(
+            os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
+
         context_chunks = []
         context_metadata = []
-        
+
         if search_results["documents"] and search_results["distances"]:
-            logger.info(f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-            
+            logger.info(
+                f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
+
             for i, (doc, metadata, distance) in enumerate(zip(
                 search_results["documents"][0],
                 search_results["metadatas"][0],
                 search_results["distances"][0]
             )):
-                logger.debug(f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-                
+                logger.debug(
+                    f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
+
                 # Only include chunks that are sufficiently relevant
                 if distance <= relevance_threshold:
                     context_chunks.append(doc)
                     context_metadata.append(metadata)
-                    logger.debug(f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+                    logger.debug(
+                        f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
                 else:
-                    logger.debug(f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-                    
+                    logger.debug(
+                        f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+
                 # Limit to top 5 relevant results
                 if len(context_chunks) >= 5:
                     break
-            
-            logger.info(f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
-        else:
-            logger.warning(f"No search results found for query: '{chat_request.message}'")
 
-        # Prepare system prompt for Qwen3
-        system_prompt = (
+            logger.info(
+                f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+        else:
+            logger.warning(
+                f"No search results found for query: '{chat_request.message}'")
+
+        # Prepare system prompt for Qwen3 with conversation history
+        base_system_prompt = (
             f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
             f"You help students, faculty, and staff find information from official documents. "
             f"Use the provided context to answer questions accurately. "
@@ -556,6 +569,21 @@ async def chat_with_documents(chat_request: ChatRequest):
             f"Always be helpful, concise, and reference the source documents when applicable. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
         )
+
+        # Add conversation history to the system prompt if available
+        system_prompt = base_system_prompt
+        if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
+            logger.info(
+                f"Including conversation history: {len(chat_request.conversation_history)} messages")
+            history_text = "\n\nPrevious conversation:\n"
+            # Last 10 messages to avoid token limit
+            for msg in chat_request.conversation_history[-10:]:
+                role = "Human" if msg.type == "user" else "Assistant"
+                history_text += f"{role}: {msg.content}\n"
+            system_prompt = base_system_prompt + history_text + \
+                "\nPlease maintain context from this conversation when answering the current question."
+        else:
+            logger.info("No conversation history provided")
 
         # Generate response using Qwen3 via Ollama
         if context_chunks:
@@ -573,12 +601,14 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # Prepare context information for frontend with actual relevance scores
         context_info = []
-        search_distances = search_results.get("distances", [[]])[0] if search_results.get("distances") else []
-        
+        search_distances = search_results.get("distances", [[]])[
+            0] if search_results.get("distances") else []
+
         for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
             # Calculate relevance score (1 - distance) for display
-            relevance_score = 1.0 - search_distances[i] if i < len(search_distances) else 1.0
-            
+            relevance_score = 1.0 - \
+                search_distances[i] if i < len(search_distances) else 1.0
+
             context_info.append(
                 {
                     "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
@@ -643,45 +673,55 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
             # Filter results by relevance score (distance threshold)
             # Lower distance = higher similarity
-            relevance_threshold = float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
-            
+            relevance_threshold = float(
+                # Configurable threshold
+                os.getenv("RELEVANCE_THRESHOLD", "0.7"))
+
             context_chunks = []
             context_metadata = []
-            
+
             if search_results["documents"] and search_results["distances"]:
-                logger.info(f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-                
+                logger.info(
+                    f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
+
                 for i, (doc, metadata, distance) in enumerate(zip(
                     search_results["documents"][0],
                     search_results["metadatas"][0],
                     search_results["distances"][0]
                 )):
-                    logger.debug(f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-                    
+                    logger.debug(
+                        f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
+
                     # Only include chunks that are sufficiently relevant
                     if distance <= relevance_threshold:
                         context_chunks.append(doc)
                         context_metadata.append(metadata)
-                        logger.debug(f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+                        logger.debug(
+                            f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
                     else:
-                        logger.debug(f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-                        
+                        logger.debug(
+                            f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+
                     # Limit to top 5 relevant results
                     if len(context_chunks) >= 5:
                         break
-                
-                logger.info(f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+
+                logger.info(
+                    f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
             else:
-                logger.warning(f"No search results found for query: '{chat_request.message}'")
+                logger.warning(
+                    f"No search results found for query: '{chat_request.message}'")
 
             # Send context information first with actual relevance scores
             context_info = []
-            search_distances = search_results.get("distances", [[]])[0] if search_results.get("distances") else []
-            
+            search_distances = search_results.get("distances", [[]])[
+                0] if search_results.get("distances") else []
+
             for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
                 # Calculate relevance score (1 - distance) for display
-                relevance_score = 1.0 - search_distances[i] if i < len(search_distances) else 1.0
-                
+                relevance_score = 1.0 - \
+                    search_distances[i] if i < len(search_distances) else 1.0
+
                 context_info.append(
                     {
                         "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
@@ -702,8 +742,8 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             }
             yield f"data: {json.dumps(metadata_response)}\n\n"
 
-            # Generate and stream response with character-level streaming
-            system_prompt = (
+            # Generate and stream response with character-level streaming including conversation history
+            base_system_prompt = (
                 f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
                 f"You help students, faculty, and staff find information from official documents. "
                 f"Use the provided context to answer questions accurately. "
@@ -711,6 +751,21 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
                 f"Always be helpful, concise, and reference the source documents when applicable. "
                 f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
             )
+
+            # Add conversation history to the system prompt if available
+            system_prompt = base_system_prompt
+            if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
+                logger.info(
+                    f"Including conversation history: {len(chat_request.conversation_history)} messages")
+                history_text = "\n\nPrevious conversation:\n"
+                # Last 10 messages to avoid token limit
+                for msg in chat_request.conversation_history[-10:]:
+                    role = "Human" if msg.type == "user" else "Assistant"
+                    history_text += f"{role}: {msg.content}\n"
+                system_prompt = base_system_prompt + history_text + \
+                    "\nPlease maintain context from this conversation when answering the current question."
+            else:
+                logger.info("No conversation history provided")
 
             # Stream response from Ollama with immediate character output
             if context_chunks:
@@ -767,6 +822,41 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
     )
 
 
+@app.post("/api/debug/test-conversation")
+async def debug_test_conversation(chat_request: ChatRequest):
+    """Debug endpoint to test conversation history handling"""
+    try:
+        logger.info(f"Test conversation request: {chat_request.message}")
+        logger.info(
+            f"Conversation history: {len(chat_request.conversation_history or [])} messages")
+
+        # Build system prompt with conversation history (same logic as main chat)
+        base_system_prompt = (
+            "You are Jagruti, a helpful assistant. "
+            "You can remember information from previous messages in this conversation."
+        )
+
+        system_prompt = base_system_prompt
+        if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
+            history_text = "\n\nPrevious conversation:\n"
+            for msg in chat_request.conversation_history[-10:]:
+                role = "Human" if msg.type == "user" else "Assistant"
+                history_text += f"{role}: {msg.content}\n"
+            system_prompt = base_system_prompt + history_text + \
+                "\nRemember the context from this conversation."
+
+        return {
+            "message": chat_request.message,
+            "conversation_history_count": len(chat_request.conversation_history or []),
+            "system_prompt_preview": system_prompt[:500] + "..." if len(system_prompt) > 500 else system_prompt,
+            "full_system_prompt_length": len(system_prompt),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in test conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/debug/search-relevance")
 async def debug_search_relevance(
     query: str,
@@ -777,14 +867,15 @@ async def debug_search_relevance(
     """Debug endpoint to check search relevance filtering"""
     try:
         # Use provided threshold or default
-        relevance_threshold = threshold if threshold is not None else float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))
-        
+        relevance_threshold = threshold if threshold is not None else float(
+            os.getenv("RELEVANCE_THRESHOLD", "0.7"))
+
         # Perform search without category filtering for debugging
         search_results = chunks_collection.query(
             query_texts=[query],
             n_results=limit,
         )
-        
+
         results = {
             "query": query,
             "threshold": relevance_threshold,
@@ -796,11 +887,11 @@ async def debug_search_relevance(
                 "excluded_count": 0,
             }
         }
-        
+
         if search_results["documents"] and search_results["distances"]:
             total_found = len(search_results["documents"][0])
             results["stats"]["total_found"] = total_found
-            
+
             for i, (doc, metadata, distance) in enumerate(zip(
                 search_results["documents"][0],
                 search_results["metadatas"][0],
@@ -816,18 +907,19 @@ async def debug_search_relevance(
                     "chunk_preview": doc[:100] + "..." if len(doc) > 100 else doc,
                     "included": distance <= relevance_threshold,
                 }
-                
+
                 results["all_results"].append(result_item)
-                
+
                 if distance <= relevance_threshold:
                     results["filtered_results"].append(result_item)
                 else:
                     results["stats"]["excluded_count"] += 1
-            
-            results["stats"]["after_filtering"] = len(results["filtered_results"])
-        
+
+            results["stats"]["after_filtering"] = len(
+                results["filtered_results"])
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in debug search relevance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
