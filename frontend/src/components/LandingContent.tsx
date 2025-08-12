@@ -34,7 +34,7 @@ const LandingContent: React.FC<LandingContentProps> = ({
           }`}
         >
           <h1 className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-bold mb-4 sm:mb-6 leading-tight">
-            <span className="bg-gradient-to-r from-[#93c5fd] via-[#60a5fa] to-[#232946] bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#93c5fd] via-[#60a5fa] to-[#6699ee] bg-clip-text text-transparent">
               Your AI Assistant
             </span>
             <br />

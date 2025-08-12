@@ -47,14 +47,28 @@ const Navbar = () => {
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
               <div className="w-8 h-8 md:w-9 md:h-9 flex items-center justify-center bg-gradient-to-r from-[#60a5fa]/20 to-[#93c5fd]/20 rounded-lg p-1.5 mr-3">
-                <TreeDeciduous className="w-full h-full text-[#60a5fa]" />
+
+                <div className="h-9 md:h-9 w-auto relative flex items-center justify-center">
+                  <Image
+                    src="/jagruti-logo.png"
+                    alt="Jagruti Logo"
+                    height={60}
+                    width={90}
+                    onClick={() => window.open("https://www.iiit.ac.in", "_blank")}
+                    className="cursor-pointer"
+                  />
+                </div>
               </div>
-              <Link
+                <Link
                 href="/"
                 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-[#93c5fd] to-[#60a5fa] bg-clip-text text-transparent mr-4"
-              >
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.location.reload();
+                }}
+                >
                 Jagruti
-              </Link>
+                </Link>
 
               {/* Status indicator moved here */}
               <div
@@ -86,12 +100,12 @@ const Navbar = () => {
 
           {/* College Logo */}
           <div className="flex items-center">
-            <div className="w-16 sm:w-22 h-12 sm:h-16 relative flex items-center justify-center">
+            <div className="h-9 md:h-9 w-auto relative flex items-center justify-center">
               <Image
-                src="/iiit-logo.png"
+                src="/iiit-logo-gradient.png"
                 alt="IIIT Logo"
-                layout="fill"
-                objectFit="contain"
+                height={60}
+                width={90}
                 onClick={() => window.open("https://www.iiit.ac.in", "_blank")}
                 className="cursor-pointer"
               />
