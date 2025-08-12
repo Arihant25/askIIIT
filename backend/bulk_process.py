@@ -1,7 +1,21 @@
 """
 Bulk document processing s    # Initialize ChromaDB
-    try:
-        chroma_client = chromadb.PersistentClient(
+         # Custom embedding function for ChromaDB
+        class CustomEmbeddingFunction:
+            def __init__(self):
+                from document_processor import DocumentProcessor
+                self.doc_processor = DocumentProcessor()
+                self._name = "qwen3_embedding_function"
+            
+            @property
+            def name(self):
+                return self._name
+            
+            def __call__(self, input):
+                if isinstance(input, str):
+                    input = [input]
+                embeddings = self.doc_processor.generate_embeddings(input)
+                return embeddings    chroma_client = chromadb.PersistentClient(
             path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
         )
         
@@ -32,6 +46,7 @@ import sys
 from pathlib import Path
 import logging
 import chromadb
+import torch
 
 # Add backend directory to Python path
 backend_dir = Path(__file__).parent
@@ -54,30 +69,27 @@ async def process_existing_pdfs():
         chroma_client = chromadb.PersistentClient(
             path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
         )
-        
-        # Custom embedding function for ChromaDB
-        class CustomEmbeddingFunction:
-            def __init__(self):
-                from document_processor import DocumentProcessor
-                self.doc_processor = DocumentProcessor()
-            
-            def __call__(self, input):
-                if isinstance(input, str):
-                    input = [input]
-                embeddings = self.doc_processor.generate_embeddings(input)
-                return embeddings
 
-        # Initialize embedding function
-        embedding_function = CustomEmbeddingFunction()
-        
-        # Create or get collections with the custom embedding function
+        # Create a proper ChromaDB-compatible embedding function using Qwen3
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        import torch
+
+        # Use SentenceTransformerEmbeddingFunction which properly wraps the model
+        embedding_function = SentenceTransformerEmbeddingFunction(
+            model_name="Qwen/Qwen3-Embedding-0.6B",
+            device="mps" if torch.backends.mps.is_available(
+            ) else "cuda" if torch.cuda.is_available() else "cpu",
+            normalize_embeddings=True
+        )
+
+        # Create or get collections with the SentenceTransformer embedding function
         documents_collection = chroma_client.get_or_create_collection(
             name="documents",
             embedding_function=embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
         chunks_collection = chroma_client.get_or_create_collection(
-            name="chunks", 
+            name="chunks",
             embedding_function=embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
@@ -176,22 +188,8 @@ def check_existing_documents():
         )
 
         try:
-            # Custom embedding function for ChromaDB
-            class CustomEmbeddingFunction:
-                def __init__(self):
-                    from document_processor import DocumentProcessor
-                    self.doc_processor = DocumentProcessor()
-                
-                def __call__(self, input):
-                    if isinstance(input, str):
-                        input = [input]
-                    embeddings = self.doc_processor.generate_embeddings(input)
-                    return embeddings
-
-            # Initialize embedding function
-            embedding_function = CustomEmbeddingFunction()
-            
-            documents_collection = chroma_client.get_collection(name="documents")
+            documents_collection = chroma_client.get_collection(
+                name="documents")
             doc_count = documents_collection.count()
             logger.info(f"Found {doc_count} existing documents in ChromaDB")
 
@@ -224,35 +222,32 @@ def reset_collections():
         chroma_client = chromadb.PersistentClient(
             path=os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")
         )
-        
+
         # Delete existing collections if they exist
         try:
             chroma_client.delete_collection(name="documents")
             logger.info("Deleted existing documents collection")
         except Exception:
             logger.info("No existing documents collection to delete")
-            
+
         try:
             chroma_client.delete_collection(name="chunks")
             logger.info("Deleted existing chunks collection")
         except Exception:
             logger.info("No existing chunks collection to delete")
-            
-        # Custom embedding function for ChromaDB
-        class CustomEmbeddingFunction:
-            def __init__(self):
-                from document_processor import DocumentProcessor
-                self.doc_processor = DocumentProcessor()
-            
-            def __call__(self, input):
-                if isinstance(input, str):
-                    input = [input]
-                embeddings = self.doc_processor.generate_embeddings(input)
-                return embeddings
 
-        # Initialize embedding function
-        embedding_function = CustomEmbeddingFunction()
-            
+        # Create a proper ChromaDB-compatible embedding function using Qwen3
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        import torch
+
+        # Use SentenceTransformerEmbeddingFunction which properly wraps the model
+        embedding_function = SentenceTransformerEmbeddingFunction(
+            model_name="Qwen/Qwen3-Embedding-0.6B",
+            device="mps" if torch.backends.mps.is_available(
+            ) else "cuda" if torch.cuda.is_available() else "cpu",
+            normalize_embeddings=True
+        )
+
         # Create new collections with correct settings
         documents_collection = chroma_client.create_collection(
             name="documents",
@@ -264,9 +259,9 @@ def reset_collections():
             embedding_function=embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
-        
+
         logger.info("Created new collections with correct embedding function")
-        
+
     except Exception as e:
         logger.error(f"Error resetting collections: {e}")
         raise
@@ -280,8 +275,10 @@ def main():
     parser.add_argument(
         "--check", action="store_true", help="Check existing documents only"
     )
-    parser.add_argument("--process", action="store_true", help="Process all PDFs")
-    parser.add_argument("--reset", action="store_true", help="Reset ChromaDB collections to fix dimension issues")
+    parser.add_argument("--process", action="store_true",
+                        help="Process all PDFs")
+    parser.add_argument("--reset", action="store_true",
+                        help="Reset ChromaDB collections to fix dimension issues")
 
     args = parser.parse_args()
 
@@ -291,7 +288,8 @@ def main():
         asyncio.run(process_existing_pdfs())
     elif args.reset:
         reset_collections()
-        logger.info("Collections reset complete. You can now run --process to add documents.")
+        logger.info(
+            "Collections reset complete. You can now run --process to add documents.")
     else:
         print("Usage:")
         print("  python bulk_process.py --check     # Check existing documents")

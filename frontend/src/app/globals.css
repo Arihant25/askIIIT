@@ -35,3 +35,45 @@ body {
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Markdown content styles */
+.markdown-content {
+  line-height: 1.6;
+}
+
+
+/* Code highlighting styles for hljs */
+.markdown-content pre code.hljs {
+  background-color: #232946;
+  color: #93c5fd;
+}
+
+.markdown-content pre code.hljs .hljs-keyword {
+  color: #60a5fa;
+}
+
+.markdown-content pre code.hljs .hljs-string {
+  color: #34d399;
+}
+
+.markdown-content pre code.hljs .hljs-comment {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.markdown-content pre code.hljs .hljs-number {
+  color: #fbbf24;
+}
+
+.markdown-content pre code.hljs .hljs-function {
+  color: #a78bfa;
+}
+
+/* Ensure proper spacing in markdown content */
+.markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-content > *:last-child {
+  margin-bottom: 0;
+}

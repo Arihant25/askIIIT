@@ -11,6 +11,8 @@ import {
   Microscope,
 } from "lucide-react";
 import ApiService from "@/lib/api";
+import MarkdownRenderer from "./MarkdownRenderer";
+import ReferencesSection from "./ReferencesSection";
 
 const categories = [
   {
@@ -67,96 +69,29 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Function to process sources and add inline citations
+
+  // Function to process sources without adding citations to content
   const processMessageWithCitations = (content: string, sources: any[]) => {
     if (!sources || sources.length === 0) {
       return { processedContent: content, groupedSources: [] };
     }
 
-    const sourceMap = new Map();
-    sources.forEach((source, index) => {
+    // Create a unique list of sources by filename
+    const uniqueSources = new Map();
+    sources.forEach((source) => {
       const key = source.filename;
-      if (!sourceMap.has(key)) {
-        sourceMap.set(key, {
+      if (!uniqueSources.has(key)) {
+        uniqueSources.set(key, {
           filename: source.filename,
           category: source.category,
-          indexes: [],
         });
       }
-      sourceMap.get(key).indexes.push(index + 1);
     });
 
-    const groupedSources = Array.from(sourceMap.values());
-    let processedContent = content;
+    const groupedSources = Array.from(uniqueSources.values());
 
-    if (!content || content.trim().length === 0) {
-      return { processedContent: content, groupedSources };
-    }
-
-    const sentences = content
-      .split(/(?<=[.!?])\s+/)
-      .filter((s) => s.trim().length > 0);
-
-    if (sentences.length > 0 && sources.length > 0) {
-      const citationsPerSentence = Math.max(
-        1,
-        Math.ceil(sources.length / sentences.length)
-      );
-      let citationIndex = 0;
-
-      const citedSentences = sentences.map((sentence) => {
-        let citedSentence = sentence;
-        const citationsToAdd = Math.min(
-          citationsPerSentence,
-          sources.length - citationIndex
-        );
-
-        if (citationsToAdd > 0) {
-          const citationNumbers = [];
-          for (let i = 0; i < citationsToAdd; i++) {
-            citationNumbers.push(citationIndex + 1);
-            citationIndex++;
-          }
-
-          const citationText = citationNumbers
-            .map(
-              (num) =>
-                `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
-            )
-            .join("");
-
-          if (sentence.match(/[.!?]$/)) {
-            citedSentence =
-              sentence.slice(0, -1) + citationText + sentence.slice(-1);
-          } else {
-            citedSentence = sentence + citationText;
-          }
-        }
-
-        return citedSentence;
-      });
-
-      if (citationIndex < sources.length) {
-        const remainingCitations = [];
-        for (let i = citationIndex; i < sources.length; i++) {
-          remainingCitations.push(i + 1);
-        }
-        const remainingCitationText = remainingCitations
-          .map(
-            (num) =>
-              `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
-          )
-          .join("");
-
-        if (citedSentences.length > 0) {
-          citedSentences[citedSentences.length - 1] += remainingCitationText;
-        }
-      }
-
-      processedContent = citedSentences.join(" ");
-    }
-
-    return { processedContent, groupedSources };
+    // Return the original content without any citations
+    return { processedContent: content, groupedSources };
   };
 
   useEffect(() => {
@@ -331,11 +266,9 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                     : "bg-[#93c5fd] text-[#232946]"
                 }`}
               >
-                {message.type === "bot" && message.processedContent ? (
-                  <div
-                    dangerouslySetInnerHTML={{
-                      __html: message.processedContent,
-                    }}
+                {message.type === "bot" ? (
+                  <MarkdownRenderer 
+                    content={message.processedContent || message.content} 
                     className="message-content"
                   />
                 ) : (
@@ -349,36 +282,7 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                 {message.type === "bot" &&
                   message.groupedSources &&
                   message.groupedSources.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-[#232946]/20">
-                      <div className="text-sm opacity-75 mb-2">References:</div>
-                      {message.groupedSources.map(
-                        (source: any, idx: number) => (
-                          <div
-                            key={idx}
-                            className="text-xs opacity-70 mb-1.5 flex items-start gap-2"
-                          >
-                            <div className="flex flex-wrap gap-1 min-w-fit">
-                              {source.indexes.map((index: number) => (
-                                <span
-                                  key={index}
-                                  className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-[#232946] text-[#93c5fd] rounded-full"
-                                >
-                                  {index}
-                                </span>
-                              ))}
-                            </div>
-                            <span className="flex-1">
-                              <span className="font-medium">
-                                {source.filename}
-                              </span>
-                              <span className="opacity-60 ml-1">
-                                ({source.category})
-                              </span>
-                            </span>
-                          </div>
-                        )
-                      )}
-                    </div>
+                    <ReferencesSection sources={message.groupedSources} />
                   )}
               </div>
 

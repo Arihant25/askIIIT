@@ -5,8 +5,10 @@ from fastapi.security import HTTPBearer
 from fastapi.responses import JSONResponse, StreamingResponse
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 import os
 from dotenv import load_dotenv
+import torch
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
@@ -179,21 +181,13 @@ async def get_admin_user(
 
 
 # Custom embedding function for ChromaDB
-class CustomEmbeddingFunction:
-    def __init__(self):
-        from document_processor import DocumentProcessor
-        self.doc_processor = DocumentProcessor()
-
-    def __call__(self, input):
-        if isinstance(input, str):
-            input = [input]
-        embeddings = self.doc_processor.generate_embeddings(input)
-        return embeddings
-
-
-# Initialize embedding function
 try:
-    embedding_function = CustomEmbeddingFunction()
+    embedding_function = SentenceTransformerEmbeddingFunction(
+        model_name="Qwen/Qwen3-Embedding-0.6B",
+        device="mps" if torch.backends.mps.is_available(
+        ) else "cuda" if torch.cuda.is_available() else "cpu",
+        normalize_embeddings=True
+    )
     logger.info("Custom embedding function initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize embedding function: {e}")
