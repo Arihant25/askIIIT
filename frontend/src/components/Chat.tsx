@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   User,
   Bot,
-  ArrowUpRight,
+  SendHorizontal,
   Book,
   School,
   Target,
@@ -157,6 +157,14 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
       let accumulatedContent = "";
       let metadata: any = null;
 
+      // Prepare previous messages as context (excluding streaming/error messages)
+      const contextMessages = messages
+        .filter((msg) => !msg.isStreaming && !msg.isError)
+        .map((msg) => ({
+          type: msg.type,
+          content: msg.content,
+        }));
+
       await ApiService.sendChatMessageStream(
         userMessage.content,
         selectedCategories,
@@ -217,7 +225,8 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
             isError: true,
           };
           setMessages((prev) => [...prev.slice(0, -1), errorMessage]);
-        }
+        },
+        contextMessages // Pass previous messages as context
       );
     } catch (error) {
       console.error("Chat error:", error);
@@ -304,7 +313,7 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
       {/* Input Form - Fixed at bottom */}
       <div className="fixed bottom-4 left-0 right-0 w-full z-30 px-4">
         <form
-          className="max-w-4xl mx-auto bg-[#232946] rounded-2xl p-4 shadow-lg"
+          className="max-w-4xl mx-auto bg-[#232946]/80 backdrop-blur-xl rounded-2xl p-4 shadow-lg"
           onSubmit={handleSubmit}
         >
           <div className="flex gap-3 mb-3">
@@ -330,7 +339,7 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
               }`}
               disabled={!inputValue.trim() || isLoading}
             >
-              <ArrowUpRight size={24} />
+              <SendHorizontal size={24} />
             </button>
           </div>
 

@@ -519,6 +519,7 @@ async def chat_with_documents(chat_request: ChatRequest):
             f"You help students, faculty, and staff find information from official documents. "
             f"Use the provided context to answer questions accurately. "
             f"If you cannot find relevant information in the context, say so politely. "
+            f"DO NOT answer questions that are not related to IIIT Hyderabad or if the information is not available in provided context. "
             f"Always be helpful, concise, and reference the source documents when applicable. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
         )

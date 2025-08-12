@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Sparkles } from "lucide-react";
+import { TreeDeciduous } from "lucide-react";
 
 const Navbar = () => {
   const [backendStatus, setBackendStatus] = useState<
@@ -47,7 +47,7 @@ const Navbar = () => {
           <div className="flex items-center">
             <div className="flex-shrink-0 flex items-center">
               <div className="w-8 h-8 md:w-9 md:h-9 flex items-center justify-center bg-gradient-to-r from-[#60a5fa]/20 to-[#93c5fd]/20 rounded-lg p-1.5 mr-3">
-                <Sparkles className="w-full h-full text-[#60a5fa]" />
+                <TreeDeciduous className="w-full h-full text-[#60a5fa]" />
               </div>
               <Link
                 href="/"
@@ -92,6 +92,8 @@ const Navbar = () => {
                 alt="IIIT Logo"
                 layout="fill"
                 objectFit="contain"
+                onClick={() => window.open("https://www.iiit.ac.in", "_blank")}
+                className="cursor-pointer"
               />
             </div>
           </div>
