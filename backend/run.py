@@ -1,5 +1,5 @@
 """
-Startup script for askIIIT backend
+Startup script for Jagruti backend
 """
 
 from colored_logging import setup_logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 async def setup_environment():
     """Setup environment and check dependencies"""
-    logger.info("Setting up askIIIT backend environment...")
+    logger.info("Setting up Jagruti backend environment...")
 
     # Check if .env file exists
     env_file = backend_dir / ".env"
@@ -78,7 +78,7 @@ def check_dependencies():
 
 def main():
     """Main startup function"""
-    logger.info("Starting askIIIT backend...")
+    logger.info("Starting Jagruti backend...")
 
     # Check dependencies first
     if not check_dependencies():

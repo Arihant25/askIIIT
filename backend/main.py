@@ -26,7 +26,7 @@ setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="askIIIT API",
+    title="Jagruti API",
     description="Backend API for IIIT document search and chatbot",
     version="1.0.0",
 )
@@ -183,12 +183,13 @@ class CustomEmbeddingFunction:
     def __init__(self):
         from document_processor import DocumentProcessor
         self.doc_processor = DocumentProcessor()
-    
+
     def __call__(self, input):
         if isinstance(input, str):
             input = [input]
         embeddings = self.doc_processor.generate_embeddings(input)
         return embeddings
+
 
 # Initialize embedding function
 try:
@@ -201,14 +202,16 @@ except Exception as e:
 # Initialize ChromaDB collections
 try:
     documents_collection = chroma_client.get_or_create_collection(
-        name="documents", 
+        name="documents",
         embedding_function=embedding_function,
-        metadata={"description": "Document metadata collection", "hnsw:space": "cosine"}
+        metadata={"description": "Document metadata collection",
+                  "hnsw:space": "cosine"}
     )
     chunks_collection = chroma_client.get_or_create_collection(
-        name="chunks", 
+        name="chunks",
         embedding_function=embedding_function,
-        metadata={"description": "Document chunks with embeddings", "hnsw:space": "cosine"}
+        metadata={"description": "Document chunks with embeddings",
+                  "hnsw:space": "cosine"}
     )
     logger.info("ChromaDB collections initialized successfully")
 except Exception as e:
@@ -220,7 +223,7 @@ except Exception as e:
 async def root():
     """Health check endpoint"""
     return {
-        "message": "askIIIT API is running!",
+        "message": "Jagruti API is running!",
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
     }
@@ -518,7 +521,7 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # Prepare system prompt for Qwen3
         system_prompt = (
-            f"You are askIIIT, a helpful assistant for IIIT Hyderabad. "
+            f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
             f"You help students, faculty, and staff find information from official documents. "
             f"Use the provided context to answer questions accurately. "
             f"If you cannot find relevant information in the context, say so politely. "
@@ -639,7 +642,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
             # Generate and stream response
             system_prompt = (
-                f"You are askIIIT, a helpful assistant for IIIT Hyderabad. "
+                f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
                 f"You help students, faculty, and staff find information from official documents. "
                 f"Use the provided context to answer questions accurately. "
                 f"If you cannot find relevant information in the context, say so politely. "

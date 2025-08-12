@@ -1,5 +1,5 @@
 """
-Setup script for askIIIT backend
+Setup script for Jagruti backend
 This script helps with initial setup and model installation
 """
 
@@ -167,7 +167,7 @@ async def run_comprehensive_test():
         summarizer = DocumentSummarizer()
 
         # Test text extraction and processing
-        test_text = "This is a test document for the askIIIT system. It contains information about IIIT Hyderabad."
+        test_text = "This is a test document for the Jagruti system. It contains information about IIIT Hyderabad."
 
         # Test chunking
         chunks = doc_processor.chunk_text(test_text)
@@ -196,7 +196,7 @@ async def run_comprehensive_test():
 
 async def main():
     """Main setup function"""
-    logger.info("=== askIIIT Backend Setup ===")
+    logger.info("=== Jagruti Backend Setup ===")
 
     # Step 1: Install dependencies
     logger.info("\n1. Installing Python dependencies...")
@@ -231,7 +231,7 @@ async def main():
         return False
 
     logger.info("\n=== Setup Complete! ===")
-    logger.info("Your askIIIT backend is ready to use!")
+    logger.info("Your Jagruti backend is ready to use!")
     logger.info("\nNext steps:")
     logger.info("1. Start the API server: python run.py")
     logger.info("2. Process existing PDFs: python bulk_process.py --process")

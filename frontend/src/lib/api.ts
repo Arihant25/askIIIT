@@ -1,35 +1,22 @@
-import { API_ENDPOINTS } from '../config/api';
+// API configuration
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+export const API_ENDPOINTS = {
+  CHAT: `${API_BASE_URL}/api/chat`,
+  CHAT_STREAM: `${API_BASE_URL}/api/chat/stream`,
+  HEALTH: `${API_BASE_URL}/health`,
+  CATEGORIES: `${API_BASE_URL}/categories`,
+};
 
 class ApiService {
-
-  async sendChatMessage(message, categories = null, conversationId = null) {
-    try {
-      const payload = {
-        message,
-        categories,
-        conversation_id: conversationId,
-      };
-
-      const response = await fetch(API_ENDPOINTS.CHAT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('Error sending chat message:', error);
-      throw error;
-    }
-  }
-
-  async sendChatMessageStream(message, categories = null, conversationId = null, onMessage, onComplete, onError) {
+  async sendChatMessageStream(
+    message: string, 
+    categories: string[] | null = null, 
+    conversationId: string | null = null,
+    onMessage?: (data: any) => void,
+    onComplete?: (finalContent: string, finalMetadata: any) => void,
+    onError?: (error: Error) => void
+  ) {
     try {
       const payload = {
         message,
@@ -49,10 +36,14 @@ class ApiService {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const reader = response.body.getReader();
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Failed to get response reader');
+      }
+
       const decoder = new TextDecoder();
       let accumulatedResponse = '';
-      let metadata = null;
+      let metadata: any = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -74,7 +65,7 @@ class ApiService {
                 metadata = data;
                 onMessage?.(data);
               } else if (data.type === 'content') {
-                if (data.content) {  // Only accumulate non-empty content
+                if (data.content) {
                   accumulatedResponse += data.content;
                 }
                 onMessage?.(data);
@@ -90,7 +81,7 @@ class ApiService {
       }
     } catch (error) {
       console.error('Error in streaming chat:', error);
-      onError?.(error);
+      onError?.(error as Error);
     }
   }
 
@@ -103,19 +94,6 @@ class ApiService {
       return await response.json();
     } catch (error) {
       console.error('Error checking health:', error);
-      throw error;
-    }
-  }
-
-  async getCategories() {
-    try {
-      const response = await fetch(API_ENDPOINTS.CATEGORIES);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error('Error fetching categories:', error);
       throw error;
     }
   }

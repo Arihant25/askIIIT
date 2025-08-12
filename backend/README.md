@@ -1,4 +1,4 @@
-# askIIIT Backend
+# Jagruti Backend
 
 A FastAPI-based backend with ChromaDB for document search and chatbot functionality using **Qwen3 models** with CAS authentication.
 
@@ -33,11 +33,13 @@ pip install -r requirements.txt
 Download and install Ollama from [https://ollama.ai/download](https://ollama.ai/download)
 
 Start Ollama server:
+
 ```bash
 ollama serve
 ```
 
 Pull the Qwen model:
+
 ```bash
 ollama pull qwen3:8b
 ```
@@ -76,6 +78,7 @@ python run.py
 ```
 
 Or directly with uvicorn:
+
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
@@ -83,11 +86,13 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ### 6. Process Existing PDFs
 
 Check existing documents:
+
 ```bash
 python bulk_process.py --check
 ```
 
 Process all PDFs in the pdfs directory:
+
 ```bash
 python bulk_process.py --process
 ```
@@ -95,32 +100,38 @@ python bulk_process.py --process
 ## API Endpoints
 
 ### Health & Status
+
 - `GET /` - Basic health check
 - `GET /health` - Comprehensive health check including model status
 
 ### Authentication
+
 - `GET /auth/login` - Get CAS login URL
 - `GET /auth/user` - Get current user info
 
 ### Documents
+
 - `POST /api/documents/upload` - Upload new document (Admin only)
 - `GET /api/documents` - List documents with filtering
 - `GET /api/categories` - Get available categories
 - `GET /api/stats` - Get system statistics
 
 ### Search & Chat
+
 - `POST /api/search` - Semantic search using Qwen3 embeddings
 - `POST /api/chat` - Chat with document context using Qwen3
 
 ## Model Architecture
 
 ### Embedding Pipeline
+
 1. **Text Extraction**: PyPDF2 for PDFs, direct reading for text files
 2. **Text Chunking**: Split into 500-character chunks with 50-character overlap
 3. **Embedding Generation**: Qwen3-Embedding-8B via sentence-transformers
 4. **Storage**: Vector embeddings stored in ChromaDB with metadata
 
 ### Chat Pipeline
+
 1. **Query Processing**: Convert user query to embedding using Qwen3-Embedding-8B
 2. **Similarity Search**: Find relevant chunks in ChromaDB
 3. **Context Preparation**: Format relevant chunks as context
@@ -130,6 +141,7 @@ python bulk_process.py --process
 ## API Documentation
 
 Once the server is running, visit:
+
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 - **Health Check**: http://localhost:8000/health
@@ -137,11 +149,13 @@ Once the server is running, visit:
 ## System Requirements
 
 ### Hardware
+
 - **RAM**: 16GB+ recommended (8GB minimum)
 - **GPU**: Optional but recommended for faster embedding generation
 - **Storage**: 10GB+ for models and document storage
 
 ### Software
+
 - **Python**: 3.8+
 - **Ollama**: Latest version
 - **CUDA**: Optional, for GPU acceleration
@@ -149,12 +163,14 @@ Once the server is running, visit:
 ## Model Performance
 
 ### Qwen3-Embedding-8B
+
 - **Dimension**: 1024
 - **Performance**: State-of-the-art multilingual embeddings
 - **Languages**: Excellent support for English and Chinese
 - **Use Case**: Document similarity and semantic search
 
 ### Qwen3 (8B) Chat Model
+
 - **Parameters**: 8 billion
 - **Performance**: High-quality conversational AI
 - **Context Length**: 32K tokens
@@ -167,7 +183,7 @@ backend/
 ├── main.py                 # Main FastAPI application
 ├── document_processor.py   # Document processing with Qwen3 embeddings
 ├── ollama_client.py       # Ollama client for Qwen3 chat
-├── auth_utils.py          # CAS authentication utilities  
+├── auth_utils.py          # CAS authentication utilities
 ├── scraper.py             # Web scraping utilities
 ├── bulk_process.py        # Bulk PDF processing script
 ├── setup.py               # Setup and installation script
@@ -182,6 +198,7 @@ backend/
 ### Testing Models
 
 Test the embedding model:
+
 ```bash
 python -c "
 from document_processor import DocumentProcessor
@@ -192,6 +209,7 @@ print(f'Embedding dimension: {len(emb[0])}')
 ```
 
 Test the chat model:
+
 ```bash
 python -c "
 import asyncio
@@ -213,17 +231,20 @@ print(result)
 ### Common Issues
 
 1. **Ollama connection fails**:
+
    ```bash
    ollama serve  # Start Ollama server
    ollama pull qwen3:8b  # Ensure model is downloaded
    ```
 
-2. **Embedding model download fails**: 
+2. **Embedding model download fails**:
+
    - Check internet connection
    - Verify Hugging Face access
    - Try `trust_remote_code=true` in config
 
 3. **Out of memory errors**:
+
    - Reduce batch size in embedding generation
    - Use CPU instead of GPU: `EMBEDDING_DEVICE=cpu`
    - Process documents in smaller batches
@@ -236,6 +257,7 @@ print(result)
 ### Logging
 
 Enable debug logging:
+
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -244,12 +266,14 @@ logging.basicConfig(level=logging.DEBUG)
 ## Production Deployment
 
 1. **Security**:
+
    - Set `DEBUG=False`
    - Use proper session storage (Redis/database)
    - Configure proper CORS origins
    - Set up SSL/TLS certificates
 
 2. **Performance**:
+
    - Use Gunicorn with multiple workers
    - Set up load balancing
    - Use GPU acceleration

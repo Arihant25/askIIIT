@@ -1,3 +1,4 @@
 0. Store dates of pdf and author and links and other metadata in the database.
 1. Use nltk to tokenise better for embedding.
 2. By default, all categories should be selected. If no categories are selected, then it should be the same as selecting all categories.
+3. Remove indicator from prod in frontend

@@ -1,0 +1,467 @@
+"use client";
+
+import React, { useState, useRef, useEffect } from "react";
+import {
+  User,
+  Bot,
+  ArrowUpRight,
+  Book,
+  School,
+  Target,
+  Microscope,
+} from "lucide-react";
+import ApiService from "@/lib/api";
+
+const categories = [
+  {
+    id: "academics",
+    label: "Academics",
+    icon: Book,
+    sources: ["academic-handbook"],
+  },
+  {
+    id: "student",
+    label: "Student",
+    icon: School,
+    sources: ["student-services"],
+  },
+  {
+    id: "faculty",
+    label: "Faculty",
+    icon: Target,
+    sources: ["faculty-handbook"],
+  },
+  {
+    id: "hostel",
+    label: "Hostel",
+    icon: Microscope,
+    sources: ["hostel-rules"],
+  },
+  { id: "mess", label: "Mess", icon: Microscope, sources: ["mess-menu"] },
+];
+
+interface Message {
+  id: number;
+  type: "user" | "bot";
+  content: string;
+  timestamp: Date;
+  sources?: any[];
+  groupedSources?: any[];
+  processedContent?: string;
+  isStreaming?: boolean;
+  isError?: boolean;
+  contextFound?: boolean;
+}
+
+interface ChatProps {
+  chatStarted: boolean;
+  setChatStarted: (started: boolean) => void;
+}
+
+const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Function to process sources and add inline citations
+  const processMessageWithCitations = (content: string, sources: any[]) => {
+    if (!sources || sources.length === 0) {
+      return { processedContent: content, groupedSources: [] };
+    }
+
+    const sourceMap = new Map();
+    sources.forEach((source, index) => {
+      const key = source.filename;
+      if (!sourceMap.has(key)) {
+        sourceMap.set(key, {
+          filename: source.filename,
+          category: source.category,
+          indexes: [],
+        });
+      }
+      sourceMap.get(key).indexes.push(index + 1);
+    });
+
+    const groupedSources = Array.from(sourceMap.values());
+    let processedContent = content;
+
+    if (!content || content.trim().length === 0) {
+      return { processedContent: content, groupedSources };
+    }
+
+    const sentences = content
+      .split(/(?<=[.!?])\s+/)
+      .filter((s) => s.trim().length > 0);
+
+    if (sentences.length > 0 && sources.length > 0) {
+      const citationsPerSentence = Math.max(
+        1,
+        Math.ceil(sources.length / sentences.length)
+      );
+      let citationIndex = 0;
+
+      const citedSentences = sentences.map((sentence) => {
+        let citedSentence = sentence;
+        const citationsToAdd = Math.min(
+          citationsPerSentence,
+          sources.length - citationIndex
+        );
+
+        if (citationsToAdd > 0) {
+          const citationNumbers = [];
+          for (let i = 0; i < citationsToAdd; i++) {
+            citationNumbers.push(citationIndex + 1);
+            citationIndex++;
+          }
+
+          const citationText = citationNumbers
+            .map(
+              (num) =>
+                `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
+            )
+            .join("");
+
+          if (sentence.match(/[.!?]$/)) {
+            citedSentence =
+              sentence.slice(0, -1) + citationText + sentence.slice(-1);
+          } else {
+            citedSentence = sentence + citationText;
+          }
+        }
+
+        return citedSentence;
+      });
+
+      if (citationIndex < sources.length) {
+        const remainingCitations = [];
+        for (let i = citationIndex; i < sources.length; i++) {
+          remainingCitations.push(i + 1);
+        }
+        const remainingCitationText = remainingCitations
+          .map(
+            (num) =>
+              `<sup style="background-color: rgba(35, 41, 70, 0.2); color: #232946; padding: 1px 4px; border-radius: 4px; font-size: 0.7em; font-weight: 600; margin-left: 2px; margin-right: 1px;">${num}</sup>`
+          )
+          .join("");
+
+        if (citedSentences.length > 0) {
+          citedSentences[citedSentences.length - 1] += remainingCitationText;
+        }
+      }
+
+      processedContent = citedSentences.join(" ");
+    }
+
+    return { processedContent, groupedSources };
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't focus if escape is pressed or if input is already focused
+      if (e.key === "Escape" || document.activeElement === inputRef.current) {
+        return;
+      }
+
+      // Don't focus if user is typing in another input/textarea or if modifier keys are pressed
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA" ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey
+      ) {
+        return;
+      }
+
+      // Focus the input for any other key press
+      inputRef.current?.focus();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputValue.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now(),
+      type: "user",
+      content: inputValue.trim(),
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setIsLoading(true);
+    if (!chatStarted) setChatStarted(true);
+
+    const botMessageId = Date.now() + 1;
+    const botMessage: Message = {
+      id: botMessageId,
+      type: "bot",
+      content: "",
+      timestamp: new Date(),
+      sources: [],
+      isStreaming: true,
+    };
+    setMessages((prev) => [...prev, botMessage]);
+
+    try {
+      let accumulatedContent = "";
+      let metadata: any = null;
+
+      await ApiService.sendChatMessageStream(
+        userMessage.content,
+        selectedCategories,
+        conversationId,
+        (data) => {
+          if (data.type === "metadata") {
+            metadata = data;
+            if (!conversationId && data.conversation_id) {
+              setConversationId(data.conversation_id);
+            }
+          } else if (data.type === "content") {
+            accumulatedContent += data.content;
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? {
+                      ...msg,
+                      content: accumulatedContent,
+                      isStreaming: !data.is_final,
+                    }
+                  : msg
+              )
+            );
+          }
+        },
+        (finalContent, finalMetadata) => {
+          const { processedContent, groupedSources } =
+            processMessageWithCitations(
+              finalContent || accumulatedContent,
+              finalMetadata?.context_chunks || []
+            );
+
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === botMessageId
+                ? {
+                    ...msg,
+                    content: finalContent || accumulatedContent,
+                    processedContent: processedContent,
+                    sources: finalMetadata?.context_chunks || [],
+                    groupedSources: groupedSources,
+                    isStreaming: false,
+                    contextFound: finalMetadata?.context_found,
+                  }
+                : msg
+            )
+          );
+        },
+        (error) => {
+          console.error("Chat streaming error:", error);
+          const errorMessage: Message = {
+            id: Date.now() + 1,
+            type: "bot",
+            content:
+              "Sorry, I encountered an error while processing your question. Please try again.",
+            timestamp: new Date(),
+            isError: true,
+          };
+          setMessages((prev) => [...prev.slice(0, -1), errorMessage]);
+        }
+      );
+    } catch (error) {
+      console.error("Chat error:", error);
+      const errorMessage: Message = {
+        id: Date.now() + 1,
+        type: "bot",
+        content:
+          "Sorry, I encountered an error while processing your question. Please try again.",
+        timestamp: new Date(),
+        isError: true,
+      };
+      setMessages((prev) => [...prev.slice(0, -1), errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Messages area */}
+      <div
+        className={`relative z-20 flex-1 overflow-y-auto hide-scrollbar transition-all duration-1000 pb-36 ${
+          chatStarted ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="max-w-4xl mx-auto px-4">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex items-end gap-4 mb-6 ${
+                message.type === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              {message.type === "bot" && (
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#232946] flex items-center justify-center shadow-lg flex-shrink-0">
+                  <Bot size={24} color="#93c5fd" />
+                </div>
+              )}
+
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md whitespace-pre-line break-words ${
+                  message.type === "user"
+                    ? "bg-[#60a5fa] text-[#181A20]"
+                    : message.isError
+                    ? "bg-red-500 text-white"
+                    : "bg-[#93c5fd] text-[#232946]"
+                }`}
+              >
+                {message.type === "bot" && message.processedContent ? (
+                  <div
+                    dangerouslySetInnerHTML={{
+                      __html: message.processedContent,
+                    }}
+                    className="message-content"
+                  />
+                ) : (
+                  message.content
+                )}
+
+                {message.type === "bot" && message.isStreaming && (
+                  <span className="inline-block w-2 h-5 bg-[#60a5fa] animate-pulse ml-1"></span>
+                )}
+
+                {message.type === "bot" &&
+                  message.groupedSources &&
+                  message.groupedSources.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-[#232946]/20">
+                      <div className="text-sm opacity-75 mb-2">References:</div>
+                      {message.groupedSources.map(
+                        (source: any, idx: number) => (
+                          <div
+                            key={idx}
+                            className="text-xs opacity-70 mb-1.5 flex items-start gap-2"
+                          >
+                            <div className="flex flex-wrap gap-1 min-w-fit">
+                              {source.indexes.map((index: number) => (
+                                <span
+                                  key={index}
+                                  className="inline-flex items-center justify-center w-4 h-4 text-[10px] font-medium bg-[#232946] text-[#93c5fd] rounded-full"
+                                >
+                                  {index}
+                                </span>
+                              ))}
+                            </div>
+                            <span className="flex-1">
+                              <span className="font-medium">
+                                {source.filename}
+                              </span>
+                              <span className="opacity-60 ml-1">
+                                ({source.category})
+                              </span>
+                            </span>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+              </div>
+
+              {message.type === "user" && (
+                <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#232946] flex items-center justify-center shadow-lg flex-shrink-0">
+                  <User size={24} color="#93c5fd" />
+                </div>
+              )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Input Form - Fixed at bottom */}
+      <div className="fixed bottom-4 left-0 right-0 w-full z-30 px-4">
+        <form
+          className="max-w-4xl mx-auto bg-[#232946] rounded-2xl p-4 shadow-lg"
+          onSubmit={handleSubmit}
+        >
+          <div className="flex gap-3 mb-3">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={
+                selectedCategories.length > 0
+                  ? `Ask about ${selectedCategories.join(", ")}...`
+                  : `Ask me anything (all categories)...`
+              }
+              className="flex-1 px-4 md:px-5 py-3 md:py-3.5 rounded-xl border-none text-base md:text-lg bg-[#181A20] text-[#93c5fd] outline-none shadow-sm"
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              className={`px-6 md:px-7 rounded-xl bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 flex items-center justify-center ${
+                !inputValue.trim() || isLoading
+                  ? "scale-100 cursor-not-allowed"
+                  : "scale-105"
+              }`}
+              disabled={!inputValue.trim() || isLoading}
+            >
+              <ArrowUpRight size={24} />
+            </button>
+          </div>
+
+          <div className="flex gap-2 justify-center flex-wrap">
+            {categories.map((cat) => {
+              const IconComp = cat.icon;
+              const isSelected = selectedCategories.includes(cat.id);
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategories((prev) => {
+                      if (prev.includes(cat.id)) {
+                        return prev.filter((id) => id !== cat.id);
+                      } else {
+                        return [...prev, cat.id];
+                      }
+                    });
+                  }}
+                  className={`flex items-center gap-2 rounded-lg px-3 md:px-4 py-2 font-medium text-sm md:text-base border-none cursor-pointer transition-all duration-200 ${
+                    isSelected
+                      ? "bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md"
+                      : "bg-[#181A20] text-[#93c5fd]"
+                  }`}
+                >
+                  <IconComp
+                    size={18}
+                    color={isSelected ? "#181A20" : "#93c5fd"}
+                  />
+                  <span>{cat.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </form>
+      </div>
+    </>
+  );
+};
+
+export default Chat;
