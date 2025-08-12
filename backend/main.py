@@ -522,7 +522,7 @@ async def chat_with_documents(chat_request: ChatRequest):
         # Filter results by relevance score (distance threshold)
         # Lower distance = higher similarity
         relevance_threshold = float(
-            os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
+            os.getenv("RELEVANCE_THRESHOLD", "0.5"))  # Configurable threshold
 
         context_chunks = []
         context_metadata = []

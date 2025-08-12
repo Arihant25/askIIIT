@@ -238,9 +238,6 @@ class OllamaClient:
     async def categorize_document(self, filename: str, text: str) -> str:
         """Automatically categorize document using Qwen model"""
         try:
-            # Use first 1000 characters for categorization
-            sample_text = text[:1000] if len(text) > 1000 else text
-
             system_prompt = (
                 "You are a document categorization assistant. "
                 "Categorize the following document into exactly one of these categories: "
@@ -250,7 +247,7 @@ class OllamaClient:
 
             prompt = (
                 f"Filename: {filename}\n\n"
-                f"Content sample: {sample_text}\n\n"
+                f"Content: {text}\n\n"
                 "Category:"
             )
 

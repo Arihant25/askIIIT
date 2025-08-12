@@ -21,7 +21,7 @@ const LandingContent: React.FC<LandingContentProps> = ({
 
   return (
     <div
-      className={`absolute inset-0 z-10 transition-all duration-1000 pt-16 pb-32 overflow-y-auto ${
+      className={`absolute inset-0 z-10 transition-all duration-1000 pt-16 overflow-y-auto ${
         chatStarted
           ? "opacity-0 translate-y-[-100vh] pointer-events-none"
           : "opacity-100 translate-y-0"

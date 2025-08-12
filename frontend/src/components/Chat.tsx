@@ -5,10 +5,11 @@ import {
   User,
   Bot,
   SendHorizontal,
-  Book,
-  School,
-  Target,
-  Microscope,
+  BookOpen,
+  GraduationCap,
+  Users,
+  BedDouble,
+  Utensils,
 } from "lucide-react";
 import ApiService from "@/lib/api";
 import MarkdownRenderer from "./MarkdownRenderer";
@@ -18,28 +19,28 @@ const categories = [
   {
     id: "academics",
     label: "Academics",
-    icon: Book,
+    icon: BookOpen,
     sources: ["academic-handbook"],
   },
   {
     id: "student",
     label: "Student",
-    icon: School,
+    icon: GraduationCap,
     sources: ["student-services"],
   },
   {
     id: "faculty",
     label: "Faculty",
-    icon: Target,
+    icon: Users,
     sources: ["faculty-handbook"],
   },
   {
     id: "hostel",
     label: "Hostel",
-    icon: Microscope,
+    icon: BedDouble,
     sources: ["hostel-rules"],
   },
-  { id: "mess", label: "Mess", icon: Microscope, sources: ["mess-menu"] },
+  { id: "mess", label: "Mess", icon: Utensils, sources: ["mess-menu"] },
 ];
 
 interface Message {
@@ -202,14 +203,14 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
             prev.map((msg) =>
               msg.id === botMessageId
                 ? {
-                    ...msg,
-                    content: finalContent || accumulatedContent,
-                    processedContent: processedContent,
-                    sources: finalMetadata?.context_chunks || [],
-                    groupedSources: groupedSources,
-                    isStreaming: false,
-                    contextFound: finalMetadata?.context_found,
-                  }
+                  ...msg,
+                  content: finalContent || accumulatedContent,
+                  processedContent: processedContent,
+                  sources: finalMetadata?.context_chunks || [],
+                  groupedSources: groupedSources,
+                  isStreaming: false,
+                  contextFound: finalMetadata?.context_found,
+                }
                 : msg
             )
           );
@@ -248,17 +249,15 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
     <>
       {/* Messages area */}
       <div
-        className={`relative z-20 flex-1 overflow-y-auto hide-scrollbar transition-all duration-1000 pb-36 ${
-          chatStarted ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
+        className={`relative z-20 flex-1 overflow-y-auto hide-scrollbar transition-all duration-1000 pb-36 ${chatStarted ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
       >
         <div className="max-w-4xl mx-auto px-4">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex items-end gap-4 mb-6 ${
-                message.type === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`flex items-end gap-4 mb-6 ${message.type === "user" ? "justify-end" : "justify-start"
+                }`}
             >
               {message.type === "bot" && (
                 <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-[#232946] flex items-center justify-center shadow-lg flex-shrink-0">
@@ -267,13 +266,12 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
               )}
 
               <div
-                className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md break-words ${
-                  message.type === "user"
+                className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md break-words ${message.type === "user"
                     ? "bg-[#60a5fa] text-[#181A20]"
                     : message.isError
-                    ? "bg-red-500 text-white"
-                    : "bg-[#93c5fd] text-[#232946]"
-                }`}
+                      ? "bg-red-500 text-white"
+                      : "bg-[#93c5fd] text-[#232946]"
+                  }`}
               >
                 {message.type === "bot" ? (
                   <MarkdownRenderer
@@ -332,11 +330,10 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
             />
             <button
               type="submit"
-              className={`px-6 md:px-7 rounded-xl bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 flex items-center justify-center ${
-                !inputValue.trim() || isLoading
+              className={`px-6 md:px-7 rounded-xl bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 flex items-center justify-center ${!inputValue.trim() || isLoading
                   ? "scale-100 cursor-not-allowed"
                   : "scale-105"
-              }`}
+                }`}
               disabled={!inputValue.trim() || isLoading}
             >
               <SendHorizontal size={24} />
@@ -360,11 +357,10 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                       }
                     });
                   }}
-                  className={`flex items-center gap-2 rounded-lg px-3 md:px-4 py-2 font-medium text-sm md:text-base border-none cursor-pointer transition-all duration-200 ${
-                    isSelected
+                  className={`flex items-center gap-2 rounded-lg px-3 md:px-4 py-2 font-medium text-sm md:text-base border-none cursor-pointer transition-all duration-200 ${isSelected
                       ? "bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md"
                       : "bg-[#181A20] text-[#93c5fd]"
-                  }`}
+                    }`}
                 >
                   <IconComp
                     size={18}
