@@ -69,6 +69,23 @@ EMBEDDING_TRUST_REMOTE_CODE=true
 # CAS Authentication
 CAS_SERVER_URL=https://login.iiit.ac.in/cas
 ADMIN_USERS=admin@iiit.ac.in,arihant.tripathy@research.iiit.ac.in,mohit.singh@research.iiit.ac.in,aviral.gupta@research.iiit.ac.in
+
+# Search Configuration
+RELEVANCE_THRESHOLD=0.7  # Distance threshold for search result filtering (0.0-1.0, lower = more strict)
+```
+
+### Search Relevance Configuration
+
+The system now includes smart filtering to ensure only relevant documents are shown as references:
+
+- **RELEVANCE_THRESHOLD**: Controls how strict the search filtering is
+  - `0.5`: Very strict - only highly relevant content (fewer results)
+  - `0.7`: Default - good balance of relevance and coverage
+  - `0.9`: Lenient - includes more potentially relevant content
+
+Use the debug endpoint to test different threshold values:
+```bash
+curl "http://localhost:8000/api/debug/search-relevance?query=your-test-query&threshold=0.6"
 ```
 
 ### 5. Start the Server
@@ -120,6 +137,8 @@ python bulk_process.py --process
 
 - `POST /api/search` - Semantic search using Qwen3 embeddings
 - `POST /api/chat` - Chat with document context using Qwen3
+- `POST /api/chat/stream` - Streaming chat with real-time responses
+- `GET /api/debug/search-relevance` - Debug search relevance filtering (requires authentication)
 
 ## Model Architecture
 

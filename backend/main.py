@@ -456,29 +456,36 @@ async def search_documents(
             else:
                 where_clause["category"] = {"$in": query_request.categories}
 
-        # Perform semantic search on chunks
+        # Perform semantic search on chunks with relevance filtering
         results = chunks_collection.query(
             query_texts=[query_request.query],
-            n_results=query_request.limit,
+            n_results=query_request.limit or 10,
             where=where_clause if where_clause else None,
         )
 
+        # Filter and format results with relevance scores
+        formatted_results = []
+        if results["documents"] and results["distances"]:
+            for chunk_id, document, metadata, distance in zip(
+                results["ids"][0],
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+            ):
+                # Only include results with reasonable relevance
+                if distance <= 0.8:  # Adjust threshold as needed
+                    formatted_results.append({
+                        "chunk_id": chunk_id,
+                        "text": document,
+                        "metadata": metadata,
+                        "distance": distance,
+                        "relevance_score": round(1.0 - distance, 3),
+                    })
+
         return {
             "query": query_request.query,
-            "results": [
-                {
-                    "chunk_id": chunk_id,
-                    "text": document,
-                    "metadata": metadata,
-                    "distance": distance,
-                }
-                for chunk_id, document, metadata, distance in zip(
-                    results["ids"][0],
-                    results["documents"][0],
-                    results["metadatas"][0],
-                    results["distances"][0],
-                )
-            ],
+            "results": formatted_results,
+            "total_found": len(formatted_results),
         }
     except Exception as e:
         logger.error(f"Error performing search: {e}")
@@ -502,16 +509,42 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         search_results = chunks_collection.query(
             query_texts=[chat_request.message],
-            n_results=5,
+            n_results=10,  # Get more results to filter by relevance
             where=where_clause if where_clause else None,
         )
 
-        context_chunks = (
-            search_results["documents"][0] if search_results["documents"] else []
-        )
-        context_metadata = (
-            search_results["metadatas"][0] if search_results["metadatas"] else []
-        )
+        # Filter results by relevance score (distance threshold)
+        # Lower distance = higher similarity
+        relevance_threshold = float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
+        
+        context_chunks = []
+        context_metadata = []
+        
+        if search_results["documents"] and search_results["distances"]:
+            logger.info(f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
+            
+            for i, (doc, metadata, distance) in enumerate(zip(
+                search_results["documents"][0],
+                search_results["metadatas"][0],
+                search_results["distances"][0]
+            )):
+                logger.debug(f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
+                
+                # Only include chunks that are sufficiently relevant
+                if distance <= relevance_threshold:
+                    context_chunks.append(doc)
+                    context_metadata.append(metadata)
+                    logger.debug(f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+                else:
+                    logger.debug(f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+                    
+                # Limit to top 5 relevant results
+                if len(context_chunks) >= 5:
+                    break
+            
+            logger.info(f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+        else:
+            logger.warning(f"No search results found for query: '{chat_request.message}'")
 
         # Prepare system prompt for Qwen3
         system_prompt = (
@@ -538,16 +571,21 @@ async def chat_with_documents(chat_request: ChatRequest):
                 + " Note: No relevant documents were found for this query.",
             )
 
-        # Prepare context information for frontend
+        # Prepare context information for frontend with actual relevance scores
         context_info = []
-        for chunk, metadata in zip(context_chunks, context_metadata):
+        search_distances = search_results.get("distances", [[]])[0] if search_results.get("distances") else []
+        
+        for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
+            # Calculate relevance score (1 - distance) for display
+            relevance_score = 1.0 - search_distances[i] if i < len(search_distances) else 1.0
+            
             context_info.append(
                 {
                     "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
                     "filename": metadata.get("filename", "Unknown"),
                     "category": metadata.get("category", "Unknown"),
                     "doc_id": metadata.get("doc_id", ""),
-                    "relevance_score": 1.0,  # You could calculate this from distances
+                    "relevance_score": round(relevance_score, 3),
                 }
             )
 
@@ -599,29 +637,58 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
 
             search_results = chunks_collection.query(
                 query_texts=[chat_request.message],
-                n_results=5,
+                n_results=10,  # Get more results to filter by relevance
                 where=where_clause if where_clause else None,
             )
 
-            context_chunks = (
-                search_results["documents"][0] if search_results["documents"] else [
-                ]
-            )
-            context_metadata = (
-                search_results["metadatas"][0] if search_results["metadatas"] else [
-                ]
-            )
+            # Filter results by relevance score (distance threshold)
+            # Lower distance = higher similarity
+            relevance_threshold = float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))  # Configurable threshold
+            
+            context_chunks = []
+            context_metadata = []
+            
+            if search_results["documents"] and search_results["distances"]:
+                logger.info(f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
+                
+                for i, (doc, metadata, distance) in enumerate(zip(
+                    search_results["documents"][0],
+                    search_results["metadatas"][0],
+                    search_results["distances"][0]
+                )):
+                    logger.debug(f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
+                    
+                    # Only include chunks that are sufficiently relevant
+                    if distance <= relevance_threshold:
+                        context_chunks.append(doc)
+                        context_metadata.append(metadata)
+                        logger.debug(f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+                    else:
+                        logger.debug(f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+                        
+                    # Limit to top 5 relevant results
+                    if len(context_chunks) >= 5:
+                        break
+                
+                logger.info(f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+            else:
+                logger.warning(f"No search results found for query: '{chat_request.message}'")
 
-            # Send context information first
+            # Send context information first with actual relevance scores
             context_info = []
-            for chunk, metadata in zip(context_chunks, context_metadata):
+            search_distances = search_results.get("distances", [[]])[0] if search_results.get("distances") else []
+            
+            for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
+                # Calculate relevance score (1 - distance) for display
+                relevance_score = 1.0 - search_distances[i] if i < len(search_distances) else 1.0
+                
                 context_info.append(
                     {
                         "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
                         "filename": metadata.get("filename", "Unknown"),
                         "category": metadata.get("category", "Unknown"),
                         "doc_id": metadata.get("doc_id", ""),
-                        "relevance_score": 1.0,
+                        "relevance_score": round(relevance_score, 3),
                     }
                 )
 
@@ -698,6 +765,72 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             "Transfer-Encoding": "chunked",
         }
     )
+
+
+@app.get("/api/debug/search-relevance")
+async def debug_search_relevance(
+    query: str,
+    threshold: Optional[float] = None,
+    limit: int = 10,
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Debug endpoint to check search relevance filtering"""
+    try:
+        # Use provided threshold or default
+        relevance_threshold = threshold if threshold is not None else float(os.getenv("RELEVANCE_THRESHOLD", "0.7"))
+        
+        # Perform search without category filtering for debugging
+        search_results = chunks_collection.query(
+            query_texts=[query],
+            n_results=limit,
+        )
+        
+        results = {
+            "query": query,
+            "threshold": relevance_threshold,
+            "all_results": [],
+            "filtered_results": [],
+            "stats": {
+                "total_found": 0,
+                "after_filtering": 0,
+                "excluded_count": 0,
+            }
+        }
+        
+        if search_results["documents"] and search_results["distances"]:
+            total_found = len(search_results["documents"][0])
+            results["stats"]["total_found"] = total_found
+            
+            for i, (doc, metadata, distance) in enumerate(zip(
+                search_results["documents"][0],
+                search_results["metadatas"][0],
+                search_results["distances"][0]
+            )):
+                result_item = {
+                    "rank": i + 1,
+                    "distance": round(distance, 4),
+                    "relevance_score": round(1.0 - distance, 4),
+                    "filename": metadata.get("filename", "Unknown"),
+                    "category": metadata.get("category", "Unknown"),
+                    "doc_id": metadata.get("doc_id", ""),
+                    "chunk_preview": doc[:100] + "..." if len(doc) > 100 else doc,
+                    "included": distance <= relevance_threshold,
+                }
+                
+                results["all_results"].append(result_item)
+                
+                if distance <= relevance_threshold:
+                    results["filtered_results"].append(result_item)
+                else:
+                    results["stats"]["excluded_count"] += 1
+            
+            results["stats"]["after_filtering"] = len(results["filtered_results"])
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in debug search relevance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/categories")
