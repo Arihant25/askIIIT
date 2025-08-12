@@ -69,11 +69,13 @@ class OllamaClient:
                                     current_status = data['status']
                                     # Only log when status changes to reduce spam
                                     if current_status != last_status:
-                                        logger.info(f"Pull status: {current_status}")
+                                        logger.info(
+                                            f"Pull status: {current_status}")
                                         last_status = current_status
-                                    
+
                                     if current_status == "success":
-                                        logger.info(f"Model {model_name} pulled successfully")
+                                        logger.info(
+                                            f"Model {model_name} pulled successfully")
                                         return True
                             except json.JSONDecodeError:
                                 continue
@@ -180,16 +182,21 @@ class OllamaClient:
                             "temperature": 0.7,
                             "top_p": 0.9,
                             "max_tokens": 4096,
+                            "num_predict": 4096,
                         },
                     },
                 ) as response:
                     response.raise_for_status()
+                    buffer = ""
                     async for line in response.aiter_lines():
                         if line:
                             try:
                                 data = json.loads(line)
-                                if "response" in data:
-                                    yield data["response"]
+                                if "response" in data and data["response"]:
+                                    # Yield each character or small chunk immediately
+                                    response_text = data["response"]
+                                    for char in response_text:
+                                        yield char
                                 if data.get("done", False):
                                     break
                             except json.JSONDecodeError:

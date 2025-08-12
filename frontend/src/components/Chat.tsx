@@ -170,15 +170,16 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
           } else if (data.type === "content") {
             accumulatedContent += data.content;
             setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === botMessageId
-                  ? {
-                      ...msg,
-                      content: accumulatedContent,
-                      isStreaming: !data.is_final,
-                    }
-                  : msg
-              )
+              prev.map((msg) => {
+                if (msg.id === botMessageId) {
+                  return {
+                    ...msg,
+                    content: accumulatedContent,
+                    isStreaming: !data.is_final,
+                  };
+                }
+                return msg;
+              })
             );
           }
         },

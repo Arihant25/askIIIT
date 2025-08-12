@@ -634,7 +634,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             }
             yield f"data: {json.dumps(metadata_response)}\n\n"
 
-            # Generate and stream response
+            # Generate and stream response with character-level streaming
             system_prompt = (
                 f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
                 f"You help students, faculty, and staff find information from official documents. "
@@ -644,7 +644,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
                 f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
             )
 
-            # Stream response from Ollama
+            # Stream response from Ollama with immediate character output
             if context_chunks:
                 response_stream = ollama_client.generate_response_stream(
                     prompt=chat_request.message,
@@ -658,7 +658,7 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
                     + " Note: No relevant documents were found for this query.",
                 )
 
-            # Stream the response chunks
+            # Stream the response chunks immediately
             async for chunk in response_stream:
                 if chunk:
                     chunk_response = {
@@ -680,7 +680,8 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             logger.error(f"Error in streaming chat: {e}")
             error_response = {
                 "type": "error",
-                "error": "I apologize, but I'm having trouble processing your request right now. Please try again later."
+                "error": ("I apologize, but I'm having trouble processing "
+                          "your request right now. Please try again later.")
             }
             yield f"data: {json.dumps(error_response)}\n\n"
 
@@ -691,6 +692,9 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Transfer-Encoding": "chunked",
         }
     )
 
