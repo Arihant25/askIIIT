@@ -69,7 +69,6 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-
   // Function to process sources without adding citations to content
   const processMessageWithCitations = (content: string, sources: any[]) => {
     if (!sources || sources.length === 0) {
@@ -258,7 +257,7 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
               )}
 
               <div
-                className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md whitespace-pre-line break-words ${
+                className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md break-words ${
                   message.type === "user"
                     ? "bg-[#60a5fa] text-[#181A20]"
                     : message.isError
@@ -267,8 +266,8 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                 }`}
               >
                 {message.type === "bot" ? (
-                  <MarkdownRenderer 
-                    content={message.processedContent || message.content} 
+                  <MarkdownRenderer
+                    content={message.processedContent || message.content}
                     className="message-content"
                   />
                 ) : (
@@ -276,7 +275,11 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                 )}
 
                 {message.type === "bot" && message.isStreaming && (
-                  <span className="inline-block w-2 h-5 bg-[#60a5fa] animate-pulse ml-1"></span>
+                  <div className="typing-indicator ml-1 inline-flex items-center">
+                    <span className="dot"></span>
+                    <span className="dot"></span>
+                    <span className="dot"></span>
+                  </div>
                 )}
 
                 {message.type === "bot" &&
