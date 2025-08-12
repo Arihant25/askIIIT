@@ -45,10 +45,10 @@ const ReferencesSection: React.FC<ReferencesSectionProps> = ({ sources }) => {
               title={`Download ${source.filename}`}
             >
               <div className="flex-shrink-0">
-                <Download size={14} className="text-[#93c5fd] group-hover:text-[#60a5fa] transition-colors duration-200" />
+                <Download size={14} className="text-[#232946] transition-colors duration-200" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-[#232946] group-hover:text-[#60a5fa] transition-colors duration-200 truncate">
+                <div className="text-xs font-medium text-[#232946] transition-colors duration-200 truncate">
                   {source.filename}
                 </div>
                 <div className="text-xs opacity-60 text-[#232946]">
