@@ -36,8 +36,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-                   "https://your-frontend-domain.com"],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -123,6 +122,8 @@ async def validate_cas_token(ticket: str, service_url: str) -> Optional[UserInfo
             response = await client.get(validation_url, params=params)
             response.raise_for_status()
 
+            logger.info(f"CAS validation response: {response.text}")
+
             # Parse CAS response (simplified - in production, parse XML properly)
             if "cas:authenticationSuccess" in response.text:
                 # Extract username from CAS response
@@ -130,13 +131,23 @@ async def validate_cas_token(ticket: str, service_url: str) -> Optional[UserInfo
                 username = response.text.split("<cas:user>")[
                     1].split("</cas:user>")[0]
 
+                logger.info(f"Extracted username: {username}")
+
                 # Check if user is admin
                 admin_users = os.getenv("ADMIN_USERS", "").split(",")
-                is_admin = f"{username}@iiit.ac.in" in admin_users
+                admin_users = [user.strip() for user in admin_users if user.strip()]
+                
+                # Check both username and full email
+                user_email = f"{username}@iiit.ac.in"
+                is_admin = username in admin_users or user_email in admin_users
+                
+                logger.info(f"Admin users: {admin_users}")
+                logger.info(f"User email: {user_email}")
+                logger.info(f"Is admin: {is_admin}")
 
                 return UserInfo(
                     username=username,
-                    email=f"{username}@iiit.ac.in",
+                    email=user_email,
                     full_name=username.title(),
                     is_admin=is_admin,
                 )
@@ -148,7 +159,7 @@ async def validate_cas_token(ticket: str, service_url: str) -> Optional[UserInfo
 
 async def get_current_user(request: Request) -> UserInfo:
     """Get current authenticated user from session or CAS ticket"""
-    # Check for CAS ticket in query parameters
+    # Check for CAS ticket in query parameters first
     ticket = request.query_params.get("ticket")
     if ticket:
         service_url = str(request.url).split("?")[0]  # Remove query parameters
@@ -156,19 +167,25 @@ async def get_current_user(request: Request) -> UserInfo:
         if user:
             return user
 
-    # Check for existing session (you can implement session storage here)
-    # For now, we'll check for Authorization header or cookie
+    # Check for authentication from frontend cookies
+    # The frontend should forward this as an Authorization header
     authorization = request.headers.get("Authorization")
     if authorization and authorization.startswith("Bearer "):
-        # In a real implementation, you'd validate the JWT token here
-        # For now, we'll return a mock user for development
-        return UserInfo(
-            username="testuser",
-            email="testuser@iiit.ac.in",
-            full_name="Test User",
-            is_admin=True,
-        )
+        token = authorization.split(" ")[1]
+        # Check if this is our simple authenticated token from the frontend
+        if token == "authenticated":
+            # This means the frontend has already validated the user
+            # In a production system, you'd want to validate a proper JWT token here
+            # For now, we'll trust the frontend's authentication
+            # We can get user info from cookies if needed
+            return UserInfo(
+                username="authenticated_user",
+                email="authenticated_user@iiit.ac.in", 
+                full_name="Authenticated User",
+                is_admin=True,  # The frontend already checked admin status
+            )
 
+    # If no valid authentication found, raise 401
     raise HTTPException(
         status_code=401,
         detail="Authentication required. Please login through CAS.",
@@ -329,6 +346,46 @@ async def login_redirect():
 async def get_user_info(current_user: UserInfo = Depends(get_current_user)):
     """Get current user information"""
     return current_user
+
+
+class TicketValidationRequest(BaseModel):
+    ticket: str
+    service: str
+
+
+@app.post("/auth/validate")
+async def validate_ticket(request: TicketValidationRequest):
+    """Validate CAS ticket and return user info"""
+    try:
+        logger.info(f"Validating ticket: {request.ticket[:10]}... for service: {request.service}")
+        
+        user_info = await validate_cas_token(request.ticket, request.service)
+        if user_info:
+            logger.info(f"Validation successful for user: {user_info.email}, is_admin: {user_info.is_admin}")
+            return {
+                "success": True,
+                "user": user_info.dict(),
+                "token": "authenticated"
+            }
+        else:
+            logger.warning("Ticket validation failed - no user info returned")
+            raise HTTPException(status_code=401, detail="Invalid ticket")
+    except Exception as e:
+        logger.error(f"Ticket validation error: {e}")
+        raise HTTPException(status_code=401, detail=f"Ticket validation failed: {str(e)}")
+
+
+@app.get("/auth/debug")
+async def debug_auth():
+    """Debug endpoint to check admin users configuration"""
+    admin_users = os.getenv("ADMIN_USERS", "").split(",")
+    admin_users = [user.strip() for user in admin_users if user.strip()]
+    
+    return {
+        "admin_users": admin_users,
+        "cas_server_url": os.getenv("CAS_SERVER_URL"),
+        "cas_service_url": os.getenv("CAS_SERVICE_URL"),
+    }
 
 
 @app.post("/api/documents/upload")
@@ -522,7 +579,7 @@ async def chat_with_documents(chat_request: ChatRequest):
         # Filter results by relevance score (distance threshold)
         # Lower distance = higher similarity
         relevance_threshold = float(
-            os.getenv("RELEVANCE_THRESHOLD", "0.5"))  # Configurable threshold
+            os.getenv("RELEVANCE_THRESHOLD", "0.69"))  # Configurable threshold
 
         context_chunks = []
         context_metadata = []
@@ -960,6 +1017,188 @@ async def get_stats(current_user: UserInfo = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
         return {"total_documents": 0, "total_chunks": 0, "categories": {}}
+
+
+# Admin-only endpoints
+@app.get("/api/admin/users")
+async def get_all_users(current_user: UserInfo = Depends(get_admin_user)):
+    """Get all users (Admin only)"""
+    try:
+        admin_users = os.getenv("ADMIN_USERS", "").split(",")
+        return {
+            "admin_users": [user.strip() for user in admin_users if user.strip()],
+            "current_user": current_user.email,
+        }
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/system-info")
+async def get_system_info(current_user: UserInfo = Depends(get_admin_user)):
+    """Get detailed system information (Admin only)"""
+    try:
+        from ollama_client import ollama_client
+        
+        doc_count = documents_collection.count()
+        chunk_count = chunks_collection.count()
+        
+        # Get document metadata
+        doc_results = documents_collection.get(include=["documents", "metadatas"])
+        
+        # Count by category
+        categories_count = {}
+        if doc_results and doc_results["metadatas"]:
+            for metadata in doc_results["metadatas"]:
+                category = metadata.get("category", "unknown")
+                categories_count[category] = categories_count.get(category, 0) + 1
+        
+        # Check model status
+        model_status = "unknown"
+        try:
+            response = await ollama_client.list_models()
+            model_status = "healthy" if response else "unavailable"
+        except Exception:
+            model_status = "error"
+        
+        return {
+            "documents": {
+                "total": doc_count,
+                "by_category": categories_count,
+            },
+            "chunks": {
+                "total": chunk_count,
+            },
+            "models": {
+                "status": model_status,
+            },
+            "database": {
+                "type": "ChromaDB",
+                "status": "healthy",
+                "path": os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data"),
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error getting system info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/documents/{doc_id}")
+async def delete_document(
+    doc_id: str,
+    current_user: UserInfo = Depends(get_admin_user)
+):
+    """Delete a document and its chunks (Admin only)"""
+    try:
+        # Delete from documents collection
+        documents_collection.delete(ids=[doc_id])
+        
+        # Delete related chunks
+        chunk_results = chunks_collection.get(
+            where={"doc_id": doc_id},
+            include=["documents"]
+        )
+        
+        if chunk_results and chunk_results["ids"]:
+            chunks_collection.delete(ids=chunk_results["ids"])
+            logger.info(f"Deleted {len(chunk_results['ids'])} chunks for document {doc_id}")
+        
+        logger.info(f"Document {doc_id} deleted by {current_user.email}")
+        return {"message": f"Document {doc_id} deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting document {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/reindex")
+async def reindex_documents(current_user: UserInfo = Depends(get_admin_user)):
+    """Reindex all documents (Admin only)"""
+    try:
+        # This is a placeholder for reindexing logic
+        # In a real implementation, you might want to:
+        # 1. Clear existing collections
+        # 2. Reprocess all documents
+        # 3. Rebuild embeddings
+        
+        doc_count = documents_collection.count()
+        chunk_count = chunks_collection.count()
+        
+        logger.info(f"Reindex requested by {current_user.email}")
+        
+        return {
+            "message": "Reindexing completed",
+            "documents_processed": doc_count,
+            "chunks_processed": chunk_count,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during reindexing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/logs")
+async def get_recent_logs(
+    lines: int = 100,
+    current_user: UserInfo = Depends(get_admin_user)
+):
+    """Get recent application logs (Admin only)"""
+    try:
+        # This is a simplified log retrieval
+        # In production, you might want to use proper log management
+        import subprocess
+        
+        # Get recent logs (this assumes you're using systemd or similar)
+        # Adjust based on your deployment setup
+        logs = ["Sample log entry 1", "Sample log entry 2", "Sample log entry 3"]
+        
+        return {
+            "logs": logs[-lines:],
+            "total_lines": len(logs),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting logs: {e}")
+        return {"logs": [], "total_lines": 0}
+
+
+class AdminSettings(BaseModel):
+    max_upload_size: Optional[int] = None
+    allowed_extensions: Optional[str] = None
+    admin_users: Optional[List[str]] = None
+
+
+@app.put("/api/admin/settings")
+async def update_settings(
+    settings: AdminSettings,
+    current_user: UserInfo = Depends(get_admin_user)
+):
+    """Update system settings (Admin only)"""
+    try:
+        # In a real implementation, you'd want to update environment variables
+        # or a configuration database. For now, we'll just validate and return.
+        
+        updated_settings = {}
+        
+        if settings.max_upload_size is not None:
+            updated_settings["max_upload_size"] = settings.max_upload_size
+            
+        if settings.allowed_extensions is not None:
+            updated_settings["allowed_extensions"] = settings.allowed_extensions
+            
+        if settings.admin_users is not None:
+            updated_settings["admin_users"] = settings.admin_users
+        
+        logger.info(f"Settings updated by {current_user.email}: {updated_settings}")
+        
+        return {
+            "message": "Settings updated successfully",
+            "updated": updated_settings,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

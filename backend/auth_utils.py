@@ -17,7 +17,7 @@ class CASAuthenticator:
         self.cas_server_url = os.getenv(
             "CAS_SERVER_URL", "https://login.iiit.ac.in/cas"
         )
-        self.service_url = os.getenv("CAS_SERVICE_URL", "http://localhost:8000")
+        self.service_url = os.getenv("CAS_SERVICE_URL", "http://https://login.iiit.ac.in/cas")
         self.admin_users = os.getenv("ADMIN_USERS", "").split(",")
 
     def get_login_url(self, service_url: Optional[str] = None) -> str:
