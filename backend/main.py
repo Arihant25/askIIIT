@@ -1,4 +1,6 @@
 from colored_logging import setup_logging
+from log_capture import setup_log_capture, get_recent_logs
+from processing_status import get_processing_status
 from fastapi import FastAPI, HTTPException, Depends, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
@@ -13,6 +15,8 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 import uuid
+import psutil
+import time
 import httpx
 from urllib.parse import urlencode, quote
 import logging
@@ -25,7 +29,11 @@ load_dotenv()
 # Configure colored logging
 
 setup_logging(level=logging.INFO)
+setup_log_capture()  # Set up log capture for admin panel
 logger = logging.getLogger(__name__)
+
+# Track application start time for uptime calculation
+app_start_time = time.time()
 
 app = FastAPI(
     title="Jagruti API",
@@ -239,6 +247,8 @@ except Exception as e:
 @app.get("/")
 async def root():
     """Health check endpoint"""
+    logger.info("Root endpoint accessed - API is running normally")
+    logger.debug("Health check completed successfully")
     return {
         "message": "Jagruti API is running!",
         "status": "healthy",
@@ -493,8 +503,31 @@ async def list_documents(
             where=where_clause if where_clause else None, limit=limit, offset=offset
         )
 
+        # Enhance documents with chunk count information
+        enhanced_documents = []
+        if results["metadatas"] and results["ids"]:
+            for i, metadata in enumerate(results["metadatas"]):
+                doc_id = results["ids"][i]
+                
+                # Get chunk count for this document
+                chunk_results = chunks_collection.get(
+                    where={"doc_id": doc_id},
+                    include=["documents"]
+                )
+                chunk_count = len(chunk_results["ids"]) if chunk_results["ids"] else 0
+                
+                # Add additional metadata
+                enhanced_doc = {
+                    **metadata,
+                    "doc_id": doc_id,
+                    "chunk_count": chunk_count,
+                    "embedding_count": chunk_count,
+                    "status": "processed",
+                }
+                enhanced_documents.append(enhanced_doc)
+
         return {
-            "documents": results["metadatas"],
+            "documents": enhanced_documents,
             "total": len(results["ids"]),
             "limit": limit,
             "offset": offset,
@@ -1058,8 +1091,69 @@ async def get_system_info(current_user: UserInfo = Depends(get_admin_user)):
         try:
             response = await ollama_client.list_models()
             model_status = "healthy" if response else "unavailable"
-        except Exception:
+            logger.debug(f"Model status check: {model_status}")
+        except Exception as e:
             model_status = "error"
+            logger.warning(f"Model status check failed: {e}")
+        
+        # Get real processing status
+        processing_status = get_processing_status().get_status()
+        
+        # Get real backend status with actual system metrics
+        try:
+            # Get system memory info
+            memory_info = psutil.virtual_memory()
+            
+            # Get current process info
+            process = psutil.Process()
+            process_memory = process.memory_info()
+            
+            # Calculate uptime
+            uptime_seconds = time.time() - app_start_time
+            hours = int(uptime_seconds // 3600)
+            minutes = int((uptime_seconds % 3600) // 60)
+            seconds = int(uptime_seconds % 60)
+            uptime_str = f"{hours}h {minutes}m {seconds}s"
+            
+            # Get CPU percentage with a brief interval for accuracy
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            
+            # Get disk usage for the current directory
+            disk_usage = psutil.disk_usage('/')
+            
+            # Get load average (on Unix systems)
+            try:
+                load_avg = psutil.getloadavg()
+                load_average = round(load_avg[0], 2) if load_avg else None
+            except (AttributeError, OSError):
+                load_average = None
+            
+            backend_status = {
+                "status": "healthy",
+                "uptime": uptime_str,
+                "memory_usage": round(process_memory.rss / 1024 / 1024, 1),  # Process memory in MB
+                "memory_percent": round(process_memory.rss / memory_info.total * 100, 1),  # Process memory as % of total
+                "system_memory_total": round(memory_info.total / 1024 / 1024 / 1024, 1),  # Total system memory in GB
+                "system_memory_used": round(memory_info.used / 1024 / 1024 / 1024, 1),   # Used system memory in GB
+                "system_memory_percent": round(memory_info.percent, 1),
+                "cpu_percent": round(cpu_percent, 1),
+                "cpu_count": psutil.cpu_count(),
+                "disk_usage_percent": round(disk_usage.percent, 1),
+                "load_average": load_average,
+                "boot_time": datetime.fromtimestamp(psutil.boot_time()).isoformat(),
+            }
+            
+            # Log actual values for debugging
+            logger.debug(f"Real system stats - CPU: {cpu_percent}%, Memory: {memory_info.percent}%, Process Memory: {process_memory.rss / 1024 / 1024:.1f}MB")
+            
+        except Exception as e:
+            logger.error(f"Error getting system stats: {e}")
+            backend_status = {
+                "status": "error", 
+                "uptime": "Unknown",
+                "memory_usage": 0,
+                "error": str(e)
+            }
         
         return {
             "documents": {
@@ -1077,6 +1171,8 @@ async def get_system_info(current_user: UserInfo = Depends(get_admin_user)):
                 "status": "healthy",
                 "path": os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data"),
             },
+            "processing": processing_status,
+            "backend": backend_status,
         }
     except Exception as e:
         logger.error(f"Error getting system info: {e}")
@@ -1138,28 +1234,199 @@ async def reindex_documents(current_user: UserInfo = Depends(get_admin_user)):
 
 
 @app.get("/api/admin/logs")
-async def get_recent_logs(
+async def get_admin_logs(
     lines: int = 100,
+    level: Optional[str] = None,
     current_user: UserInfo = Depends(get_admin_user)
 ):
     """Get recent application logs (Admin only)"""
     try:
-        # This is a simplified log retrieval
-        # In production, you might want to use proper log management
-        import subprocess
+        # Add some real-time logging to demonstrate the system is working
+        logger.info(f"Admin logs request: lines={lines}, level={level}, user={current_user.email}")
         
-        # Get recent logs (this assumes you're using systemd or similar)
-        # Adjust based on your deployment setup
-        logs = ["Sample log entry 1", "Sample log entry 2", "Sample log entry 3"]
+        # Generate some test log entries to demonstrate different levels
+        if len(get_recent_logs(count=10)) < 5:  # Only add if we don't have many logs yet
+            logger.debug("Log capture system is operational")
+            logger.warning("This is a sample warning message for testing filters")
+            logger.error("Sample error message - this is just for testing log levels")
+        
+        # Get real logs from the log capture system
+        logs = get_recent_logs(count=lines, level_filter=level)
+        
+        logger.debug(f"Retrieved {len(logs)} raw logs from capture system")
+        
+        # Transform logs to the expected format and reverse order (most recent first)
+        formatted_logs = []
+        for log_entry in reversed(logs):  # Reverse to show most recent first
+            # Ensure we have all required fields
+            formatted_log = {
+                "timestamp": log_entry.get("timestamp", datetime.now().isoformat()),
+                "level": log_entry.get("level", "INFO"),
+                "message": log_entry.get("raw_message", log_entry.get("message", "")),
+                "source": log_entry.get("source", "unknown")
+            }
+            formatted_logs.append(formatted_log)
+        
+        logger.info(f"Returning {len(formatted_logs)} formatted logs (level filter: {level})")
         
         return {
-            "logs": logs[-lines:],
-            "total_lines": len(logs),
+            "logs": formatted_logs,
+            "total_lines": len(formatted_logs),
+            "filter_applied": {
+                "level": level,
+                "lines_requested": lines,
+                "lines_returned": len(formatted_logs)
+            }
         }
         
     except Exception as e:
-        logger.error(f"Error getting logs: {e}")
-        return {"logs": [], "total_lines": 0}
+        logger.error(f"Error getting logs: {e}", exc_info=True)
+        return {"logs": [], "total_lines": 0, "error": str(e)}
+
+
+@app.post("/api/admin/bulk-process")
+async def start_bulk_processing(current_user: UserInfo = Depends(get_admin_user)):
+    """Start bulk processing of uploaded documents (Admin only)"""
+    try:
+        import subprocess
+        import os
+        from pathlib import Path
+        
+        # Run bulk_process.py script
+        backend_dir = Path(__file__).parent
+        bulk_script = backend_dir / "bulk_process.py"
+        
+        if not bulk_script.exists():
+            raise HTTPException(status_code=404, detail="Bulk processing script not found")
+        
+        # Mark processing as started
+        processing_tracker = get_processing_status()
+        processing_tracker.start_processing()
+        
+        # Start the bulk processing in background
+        # In production, you might want to use a proper task queue like Celery
+        result = subprocess.run([
+            "python", str(bulk_script), "--process"
+        ], capture_output=True, text=True, cwd=str(backend_dir))
+        
+        # Mark processing as finished
+        processing_tracker.finish_processing(result.returncode == 0)
+        
+        logger.info(f"Bulk processing initiated by admin user: {current_user.email}")
+        logger.info(f"Bulk processing script execution result - Return code: {result.returncode}")
+        
+        if result.returncode != 0:
+            logger.error(f"Bulk processing failed: {result.stderr}")
+        else:
+            logger.info(f"Bulk processing completed successfully: {result.stdout[:200]}...")
+        
+        return {
+            "message": "Bulk processing started",
+            "status": "processing",
+            "output": result.stdout if result.returncode == 0 else result.stderr
+        }
+        
+    except Exception as e:
+        logger.error(f"Error starting bulk processing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/documents/{doc_id}/details")
+async def get_document_details(
+    doc_id: str,
+    current_user: UserInfo = Depends(get_admin_user)
+):
+    """Get detailed information about a specific document (Admin only)"""
+    try:
+        # Get document metadata
+        doc_results = documents_collection.get(
+            ids=[doc_id],
+            include=["documents", "metadatas"]
+        )
+        
+        if not doc_results["ids"]:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get related chunks
+        chunk_results = chunks_collection.get(
+            where={"doc_id": doc_id},
+            include=["documents", "metadatas"]
+        )
+        
+        doc_metadata = doc_results["metadatas"][0] if doc_results["metadatas"] else {}
+        
+        return {
+            "doc_id": doc_id,
+            "name": doc_metadata.get("name", "Unknown"),
+            "category": doc_metadata.get("category", "unknown"),
+            "description": doc_metadata.get("description", ""),
+            "created_at": doc_metadata.get("created_at", ""),
+            "author": doc_metadata.get("author", "system"),
+            "chunk_count": len(chunk_results["ids"]) if chunk_results["ids"] else 0,
+            "embedding_count": len(chunk_results["ids"]) if chunk_results["ids"] else 0,
+            "status": "processed",
+            "file_size": doc_metadata.get("file_size", 0),
+            "metadata": doc_metadata
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting document details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/documents/{doc_id}/download")
+async def download_document(
+    doc_id: str,
+    current_user: UserInfo = Depends(get_current_user)
+):
+    """Download original document file"""
+    try:
+        # Get document metadata to find the file
+        doc_results = documents_collection.get(
+            ids=[doc_id],
+            include=["documents", "metadatas"]
+        )
+        
+        if not doc_results["ids"]:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        doc_metadata = doc_results["metadatas"][0] if doc_results["metadatas"] else {}
+        filename = doc_metadata.get("name", "document.pdf")
+        
+        # Look for the file in the pdfs directory
+        from pathlib import Path
+        backend_dir = Path(__file__).parent
+        pdfs_dir = backend_dir.parent / "pdfs"
+        
+        # Try to find the file
+        file_path = pdfs_dir / filename
+        if not file_path.exists():
+            # Try without extension and with .pdf
+            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            file_path = pdfs_dir / f"{base_name}.pdf"
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Original file not found")
+        
+        # Return file as streaming response
+        def file_generator():
+            with open(file_path, "rb") as file:
+                while chunk := file.read(8192):
+                    yield chunk
+        
+        return StreamingResponse(
+            file_generator(),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=\"{filename}\""}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class AdminSettings(BaseModel):

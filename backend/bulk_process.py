@@ -3,6 +3,8 @@ Bulk document processing script with memory optimization for large document coll
 """
 
 from colored_logging import setup_logging
+from log_capture import setup_log_capture
+from processing_status import get_processing_status
 from dotenv import load_dotenv
 from document_processor import DocumentProcessor, DocumentSummarizer
 import asyncio
@@ -28,6 +30,7 @@ except ImportError:
 load_dotenv()
 
 setup_logging(level=logging.INFO)
+setup_log_capture()  # Enable log capture for bulk processing
 logger = logging.getLogger(__name__)
 
 
@@ -145,6 +148,10 @@ async def process_existing_pdfs():
 
     logger.info(f"Found {len(pdf_files)} PDF files to process (sorted by size, max {max_file_size_mb}MB each)")
 
+    # Initialize processing status
+    processing_status = get_processing_status()
+    processing_status.start_processing(len(pdf_files))
+
     # Process each PDF
     processed_count = 0
     failed_count = 0
@@ -163,6 +170,9 @@ async def process_existing_pdfs():
 
             file_size_mb = pdf_file.stat().st_size / (1024 * 1024)
             logger.info(f"Processing {i+1}/{len(pdf_files)}: {pdf_file.name} ({file_size_mb:.1f} MB)")
+            
+            # Update processing status
+            processing_status.update_progress(pdf_file.name, processed_count)
 
             # MEMORY OPTIMIZATION: Read file in chunks for large files
             file_content = None
@@ -238,6 +248,9 @@ async def process_existing_pdfs():
                 del file_content
             if memory_monitor:
                 memory_monitor.cleanup_memory()
+
+    # Finalize processing status
+    processing_status.finish_processing(success=(failed_count == 0))
 
     logger.info(
         f"Bulk processing complete: {processed_count} processed, {failed_count} failed"

@@ -94,4 +94,53 @@ export class AdminAPIService {
 
     return response.json();
   }
+
+  static async getLogs() {
+    const response = await fetch('/api/admin/logs', {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch logs');
+    }
+
+    return response.json();
+  }
+
+  static async startBulkProcessing() {
+    const response = await fetch('/api/admin/bulk-process', {
+      method: 'POST',
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to start bulk processing');
+    }
+
+    return response.json();
+  }
+
+  static async getDocumentDetails(docId: string) {
+    const response = await fetch(`/api/admin/documents/${docId}/details`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch document details');
+    }
+
+    return response.json();
+  }
+
+  static async downloadDocument(docId: string) {
+    const response = await fetch(`/api/documents/${docId}/download`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to download document');
+    }
+
+    return response.blob();
+  }
 }

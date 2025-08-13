@@ -4,3 +4,4 @@
 3. Remove indicator from prod in frontend
 4. Add a disclaimer for AI Generated content.
 5. Create an admin dashboard.
+6. Ensure that a maximum of last 10 messages are sent in conversation context (can finetune depending on available hardware)

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import AdminDashboard from "@/components/admin/AdminDashboard";
+import ModernAdminDashboard from "@/components/admin/ModernAdminDashboard";
 import AdminLogin from "@/components/admin/AdminLogin";
 import { AdminAPIService } from "@/services/adminAPI";
 
@@ -84,5 +84,5 @@ export default function AdminPage() {
         );
     }
 
-    return <AdminDashboard user={user} />;
+    return <ModernAdminDashboard user={user} />;
 }

@@ -60,6 +60,7 @@ pdfplumber==0.11.7
 pillow==11.3.0
 posthog==5.4.0
 protobuf==6.31.1
+psutil==7.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pybase64==1.4.2
