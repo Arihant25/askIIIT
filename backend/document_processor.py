@@ -4,8 +4,7 @@ Document processing utilities for extracting text and creating embeddings
 
 import os
 import logging
-from typing import List, Dict, Any, Optional, Union
-import numpy as np
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uuid
 import pdfplumber
@@ -16,13 +15,12 @@ import io
 from sentence_transformers import SentenceTransformer
 import chromadb
 import torch
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-from functools import partial
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Import memory optimization utilities
 try:
-    from memory_config import MemoryMonitor, MemoryOptimizedConfig, setup_memory_optimized_environment
+    from memory_config import MemoryMonitor, setup_memory_optimized_environment
 except ImportError:
     # Fallback if memory_config is not available
     class MemoryMonitor:
@@ -45,10 +43,36 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Initialize spaCy for advanced tokenization
+def _init_spacy():
+    """Initialize spaCy with fallback options"""
+    try:
+        import spacy
+        # Try to load the model, fallback to basic tokenization if not available
+        try:
+            nlp = spacy.load("en_core_web_sm")
+            logger.info("Loaded spaCy with en_core_web_sm model for advanced tokenization")
+            return nlp
+        except OSError:
+            # Model not installed, use basic spacy tokenizer
+            try:
+                nlp = spacy.blank("en")
+                logger.warning("Using basic spaCy tokenizer. For better performance, install: python -m spacy download en_core_web_sm")
+                return nlp
+            except Exception:
+                logger.warning("spaCy not available, falling back to basic tokenization")
+                return None
+    except ImportError:
+        logger.warning("spaCy not installed, falling back to basic tokenization")
+        return None
+
+# Global spaCy instance
+nlp = _init_spacy()
+
 
 class DocumentProcessor:
     def __init__(self, embedding_model_name: Optional[str] = None, max_workers: Optional[int] = None, memory_config: Optional[Dict] = None, force_cpu: bool = False):
-        """Initialize document processor with Qwen3 embedding model and aggressive memory optimizations"""
+        """Initialize document processor with Qwen3 embedding model and parallel processing optimizations"""
         
         # Setup memory optimization
         if memory_config is None:
@@ -64,7 +88,7 @@ class DocumentProcessor:
                 "EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B"
             )
 
-            # AGGRESSIVE MEMORY OPTIMIZATION: Force CPU if requested or if GPU memory is too low
+            # OPTIMIZED: Allow parallel processing while maintaining memory safety
             device = "cpu"  # Default to CPU for safety
             
             if not force_cpu:
@@ -91,22 +115,31 @@ class DocumentProcessor:
                           "true").lower() == "true"
             )
 
-            # AGGRESSIVE MEMORY OPTIMIZATION: Ultra-conservative settings for 6GB GPU
-            self.max_workers = 1  # Single worker to avoid memory conflicts
-            self._lock = threading.Lock()
-            
-            # Ultra-small batch sizes for GPU memory conservation
+            # PARALLEL PROCESSING OPTIMIZATION: Configure based on device and available resources
             if device == "cuda":
-                self.embedding_batch_size = 1  # Process one text at a time on GPU
-                self.model_batch_size = 1  # Internal model batch size
-            else:
-                self.embedding_batch_size = 4  # CPU can handle slightly larger batches
+                # Conservative GPU settings - multiple workers but smaller batches
+                self.max_workers = max_workers or min(4, os.cpu_count() or 2)
+                self.embedding_batch_size = 2  # Small batches per worker
+                self.model_batch_size = 2
+            elif device == "mps":
+                # MPS settings - moderate parallelization
+                self.max_workers = max_workers or min(3, os.cpu_count() or 2)
+                self.embedding_batch_size = 4
                 self.model_batch_size = 4
+            else:
+                # CPU settings - more aggressive parallelization
+                self.max_workers = max_workers or min(6, os.cpu_count() or 4)
+                self.embedding_batch_size = 8
+                self.model_batch_size = 8
                 
-            self.chunk_processing_batch_size = 10  # Very small chunk batches
-            self.chunk_size = memory_config.get("chunk_size", 400)  # Smaller chunks
-            self.chunk_overlap = memory_config.get("chunk_overlap", 50)  # Less overlap
+            self.chunk_processing_batch_size = memory_config.get("chunk_processing_batch_size", 20)
+            self.chunk_size = memory_config.get("chunk_size", 400)
+            self.chunk_overlap = memory_config.get("chunk_overlap", 50)
             self.device = device
+
+            # Thread-safe model access
+            self._model_lock = threading.RLock()
+            self._worker_semaphore = threading.Semaphore(self.max_workers)
 
             # Set PyTorch memory optimization environment variables
             if device == "cuda":
@@ -131,7 +164,7 @@ class DocumentProcessor:
                 self.embedding_model.half()  # Use half precision to save memory
                 
             logger.info(f"Successfully loaded Qwen-based embedding model: {model_name}")
-            logger.info(f"Ultra-memory optimized settings: batch_size={self.embedding_batch_size}, device={device}, workers=1")
+            logger.info(f"Parallel processing enabled: {self.max_workers} workers, batch_size={self.embedding_batch_size}, device={device}")
             
             # Log initial memory usage
             if self.memory_monitor:
@@ -199,7 +232,7 @@ class DocumentProcessor:
     def chunk_text(
         self, text: str, chunk_size: Optional[int] = None, overlap: Optional[int] = None
     ) -> List[str]:
-        """Split text into overlapping chunks with memory-optimized sizes"""
+        """Split text into overlapping chunks using spaCy tokenization for better semantic boundaries"""
         if not text:
             return []
 
@@ -207,65 +240,121 @@ class DocumentProcessor:
         chunk_size = chunk_size or self.chunk_size
         overlap = overlap or self.chunk_overlap
 
+        if nlp:
+            # Use spaCy for advanced tokenization
+            try:
+                # Process text with spaCy to get sentences and tokens
+                doc = nlp(text)
+                
+                # First, try to chunk by sentences for better semantic boundaries
+                sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+                
+                if sentences:
+                    chunks = self._chunk_by_sentences(sentences, chunk_size, overlap)
+                    if chunks:
+                        logger.debug(f"Created {len(chunks)} chunks from {len(sentences)} sentences using spaCy")
+                        return chunks
+                
+                # Fallback to token-based chunking if sentence chunking doesn't work well
+                tokens = [token.text for token in doc if not token.is_space]
+                chunks = self._chunk_by_tokens(tokens, chunk_size, overlap)
+                logger.debug(f"Created {len(chunks)} chunks from {len(tokens)} tokens using spaCy")
+                return chunks
+                
+            except Exception as e:
+                logger.warning(f"Error using spaCy tokenization, falling back to basic split: {e}")
+                # Fall through to basic tokenization
+        
+        # Fallback to basic word splitting if spaCy is not available
         words = text.split()
+        chunks = self._chunk_by_tokens(words, chunk_size, overlap)
+        logger.debug(f"Created {len(chunks)} chunks from {len(words)} words using basic tokenization")
+        return chunks
+
+    def _chunk_by_sentences(self, sentences: List[str], chunk_size: int, overlap: int) -> List[str]:
+        """Create chunks based on sentences, respecting word count limits"""
         chunks = []
+        current_chunk_words = []
+        current_word_count = 0
+        
+        for sentence in sentences:
+            sentence_words = sentence.split()
+            sentence_word_count = len(sentence_words)
+            
+            # If adding this sentence would exceed chunk_size, finalize current chunk
+            if current_word_count + sentence_word_count > chunk_size and current_chunk_words:
+                chunks.append(" ".join(current_chunk_words))
+                
+                # Start new chunk with overlap
+                if overlap > 0 and len(current_chunk_words) > overlap:
+                    current_chunk_words = current_chunk_words[-overlap:]
+                    current_word_count = len(current_chunk_words)
+                else:
+                    current_chunk_words = []
+                    current_word_count = 0
+            
+            # Add sentence to current chunk
+            current_chunk_words.extend(sentence_words)
+            current_word_count += sentence_word_count
+        
+        # Add final chunk if it has content
+        if current_chunk_words:
+            chunks.append(" ".join(current_chunk_words))
+        
+        return chunks
 
-        for i in range(0, len(words), chunk_size - overlap):
-            chunk_words = words[i: i + chunk_size]
-            chunk_text = " ".join(chunk_words)
+    def _chunk_by_tokens(self, tokens: List[str], chunk_size: int, overlap: int) -> List[str]:
+        """Create chunks based on tokens/words with overlap"""
+        chunks = []
+        
+        for i in range(0, len(tokens), chunk_size - overlap):
+            chunk_tokens = tokens[i: i + chunk_size]
+            chunk_text = " ".join(chunk_tokens)
             chunks.append(chunk_text)
-
+            
             # Stop if we've reached the end
-            if i + chunk_size >= len(words):
+            if i + chunk_size >= len(tokens):
                 break
-
-        logger.debug(f"Created {len(chunks)} chunks from {len(words)} words")
+        
         return chunks
 
     def _process_embedding_batch(self, texts_batch: List[str]) -> List[List[float]]:
-        """Process a batch of texts for embedding generation with memory optimization"""
+        """Process a batch of texts for embedding generation with thread-safe access"""
         try:
-            with self._lock:  # Ensure thread-safe access to the model
-                # MEMORY OPTIMIZATION: Use smaller batch size and clear GPU cache
-                embeddings = self.embedding_model.encode(
-                    texts_batch,
-                    convert_to_tensor=False,
-                    show_progress_bar=False,
-                    batch_size=self.embedding_batch_size,  # Much smaller batch size
-                    normalize_embeddings=True,
-                )
+            with self._worker_semaphore:  # Limit concurrent workers
+                with self._model_lock:  # Ensure thread-safe access to the model
+                    # OPTIMIZED: Use configured batch size for parallel processing
+                    embeddings = self.embedding_model.encode(
+                        texts_batch,
+                        convert_to_tensor=False,
+                        show_progress_bar=False,
+                        batch_size=self.embedding_batch_size,
+                        normalize_embeddings=True,
+                    )
 
-                # Convert to list if numpy array
-                if hasattr(embeddings, "tolist"):
-                    result = embeddings.tolist()
-                else:
-                    result = list(embeddings)
-                
-                # MEMORY OPTIMIZATION: Clear GPU cache after each batch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                elif torch.backends.mps.is_available():
-                    torch.mps.empty_cache()
+                    # Convert to list if numpy array
+                    if hasattr(embeddings, "tolist"):
+                        result = embeddings.tolist()
+                    else:
+                        result = list(embeddings)
                     
-                return result
+                    # MEMORY OPTIMIZATION: Clear GPU cache after each batch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    elif torch.backends.mps.is_available():
+                        torch.mps.empty_cache()
+                        
+                    return result
         except Exception as e:
             logger.error(f"Error in batch embedding generation: {e}")
             raise
 
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings with ultra-aggressive memory optimization for low GPU memory"""
+    def _process_single_embedding(self, text: str, worker_id: int = 0) -> List[float]:
+        """Process a single text for embedding generation with error handling"""
         try:
-            logger.info(f"Generating embeddings for {len(texts)} texts (ultra-memory optimized, device={self.device})")
-
-            # ULTRA AGGRESSIVE: Process one text at a time for GPU
-            all_embeddings = []
-            
-            for i, text in enumerate(texts):
-                if i % 10 == 0:
-                    logger.debug(f"Processing text {i+1}/{len(texts)}")
-                    
-                try:
-                    # Clear GPU cache before each embedding
+            with self._worker_semaphore:
+                with self._model_lock:
+                    # Clear GPU cache before processing
                     if self.device == "cuda":
                         torch.cuda.empty_cache()
                         torch.cuda.synchronize()
@@ -274,13 +363,13 @@ class DocumentProcessor:
                         if hasattr(torch.mps, 'synchronize'):
                             torch.mps.synchronize()
                     
-                    # Process single text with minimal batch size
-                    with torch.no_grad():  # Ensure no gradients
+                    # Process single text
+                    with torch.no_grad():
                         embedding = self.embedding_model.encode(
-                            [text],  # Single text in list
+                            [text],
                             convert_to_tensor=False,
                             show_progress_bar=False,
-                            batch_size=1,  # Force batch size of 1
+                            batch_size=1,
                             normalize_embeddings=True,
                             device=self.device,
                         )
@@ -290,45 +379,151 @@ class DocumentProcessor:
                     else:
                         embedding = list(embedding)
                     
-                    # Add the single embedding
-                    all_embeddings.append(embedding[0])
-                    
-                    # AGGRESSIVE: Clear cache after each text
+                    # Clear cache after processing
                     if self.device == "cuda":
                         torch.cuda.empty_cache()
                     elif self.device == "mps":
                         torch.mps.empty_cache()
                     
-                    # Force garbage collection every 5 texts
-                    if i % 5 == 0:
-                        import gc
-                        del embedding
-                        gc.collect()
-                        
-                except torch.cuda.OutOfMemoryError as e:
-                    logger.error(f"GPU OOM on text {i+1}, switching to CPU for remaining texts")
-                    # Switch to CPU for remaining texts
-                    self._switch_to_cpu()
+                    return embedding[0]
                     
-                    # Process remaining texts on CPU
-                    remaining_texts = texts[i:]
-                    cpu_embeddings = self._process_texts_on_cpu(remaining_texts)
-                    all_embeddings.extend(cpu_embeddings)
-                    break
-                    
-                except Exception as e:
-                    logger.error(f"Error processing text {i+1}: {e}")
-                    # Skip this text and continue
-                    continue
+        except torch.cuda.OutOfMemoryError as e:
+            logger.error(f"GPU OOM in worker {worker_id}, falling back to CPU")
+            # Fallback to CPU processing
+            return self._process_single_text_cpu(text)
+        except Exception as e:
+            logger.error(f"Error in worker {worker_id} processing text: {e}")
+            raise
 
-            logger.info(f"Successfully generated {len(all_embeddings)} embeddings")
-            return all_embeddings
+    def _process_single_text_cpu(self, text: str) -> List[float]:
+        """Fallback CPU processing for a single text"""
+        try:
+            # Temporarily move model to CPU if needed
+            current_device = self.embedding_model.device
+            if str(current_device) != "cpu":
+                logger.warning("Temporarily switching to CPU for this text")
+                temp_model = self.embedding_model.to("cpu")
+            else:
+                temp_model = self.embedding_model
+            
+            with torch.no_grad():
+                embedding = temp_model.encode(
+                    [text],
+                    convert_to_tensor=False,
+                    show_progress_bar=False,
+                    batch_size=1,
+                    normalize_embeddings=True,
+                    device="cpu",
+                )
+            
+            if hasattr(embedding, "tolist"):
+                embedding = embedding.tolist()
+            else:
+                embedding = list(embedding)
+            
+            return embedding[0]
+            
+        except Exception as e:
+            logger.error(f"Error in CPU fallback processing: {e}")
+            raise
+
+    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings with parallel processing for improved efficiency"""
+        try:
+            logger.info(f"Generating embeddings for {len(texts)} texts using {self.max_workers} workers (device={self.device})")
+
+            if len(texts) == 0:
+                return []
+
+            # For small number of texts or single worker, use sequential processing
+            if len(texts) <= self.max_workers or self.max_workers == 1:
+                logger.info("Using sequential processing for small batch")
+                return self._generate_embeddings_sequential(texts)
+
+            # Use parallel processing for larger batches
+            logger.info("Using parallel processing for efficiency")
+            return self._generate_embeddings_parallel(texts)
 
         except Exception as e:
             logger.error(f"Error generating embeddings: {e}")
-            # Fallback to CPU processing
-            logger.warning("Falling back to CPU processing due to GPU memory issues")
+            # Fallback to sequential CPU processing
+            logger.warning("Falling back to sequential CPU processing")
             return self._process_texts_on_cpu(texts)
+
+    def _generate_embeddings_sequential(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings sequentially (fallback for small batches)"""
+        all_embeddings = []
+        
+        for i, text in enumerate(texts):
+            if i % 10 == 0 and i > 0:
+                logger.debug(f"Sequential processing: {i}/{len(texts)} completed")
+                
+            try:
+                embedding = self._process_single_embedding(text, worker_id=0)
+                all_embeddings.append(embedding)
+                
+                # Periodic cleanup
+                if i % 5 == 0:
+                    import gc
+                    gc.collect()
+                    
+            except Exception as e:
+                logger.error(f"Error processing text {i+1}: {e}")
+                continue
+
+        return all_embeddings
+
+    def _generate_embeddings_parallel(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using parallel processing with thread pool"""
+        all_embeddings = [None] * len(texts)  # Pre-allocate list to maintain order
+        
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="EmbeddingWorker") as executor:
+                # Submit all tasks
+                future_to_index = {}
+                
+                for i, text in enumerate(texts):
+                    future = executor.submit(self._process_single_embedding, text, i)
+                    future_to_index[future] = i
+                
+                # Process completed tasks
+                completed = 0
+                failed = 0
+                
+                for future in as_completed(future_to_index):
+                    index = future_to_index[future]
+                    
+                    try:
+                        embedding = future.result(timeout=30)  # 30 second timeout per text
+                        all_embeddings[index] = embedding
+                        completed += 1
+                        
+                        if completed % 10 == 0:
+                            logger.debug(f"Parallel processing: {completed}/{len(texts)} completed")
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to process text {index + 1}: {e}")
+                        failed += 1
+                        
+                        # Try CPU fallback for failed items
+                        try:
+                            cpu_embedding = self._process_single_text_cpu(texts[index])
+                            all_embeddings[index] = cpu_embedding
+                            logger.info(f"CPU fallback successful for text {index + 1}")
+                        except Exception as cpu_e:
+                            logger.error(f"CPU fallback also failed for text {index + 1}: {cpu_e}")
+
+                # Filter out None values (failed embeddings)
+                valid_embeddings = [emb for emb in all_embeddings if emb is not None]
+                
+                logger.info(f"Parallel processing completed: {len(valid_embeddings)} successful, {failed} failed")
+                return valid_embeddings
+
+        except Exception as e:
+            logger.error(f"Error in parallel processing: {e}")
+            # Fallback to sequential processing
+            logger.warning("Falling back to sequential processing")
+            return self._generate_embeddings_sequential(texts)
 
     def _switch_to_cpu(self):
         """Switch the model to CPU when GPU runs out of memory"""
@@ -350,43 +545,138 @@ class DocumentProcessor:
             logger.error(f"Error switching to CPU: {e}")
 
     def _process_texts_on_cpu(self, texts: List[str]) -> List[List[float]]:
-        """Process texts on CPU with larger batches since CPU has more memory"""
+        """Process texts on CPU with optimized batching for parallel processing"""
         try:
-            logger.info(f"Processing {len(texts)} texts on CPU")
+            logger.info(f"Processing {len(texts)} texts on CPU with parallel batching")
             
+            # Use larger batches for CPU since it has more memory
+            cpu_batch_size = min(16, len(texts))
             all_embeddings = []
-            cpu_batch_size = 8  # Larger batches for CPU
             
-            for i in range(0, len(texts), cpu_batch_size):
-                batch_texts = texts[i:i + cpu_batch_size]
+            # Process in batches using thread pool for CPU
+            with ThreadPoolExecutor(max_workers=min(4, self.max_workers), thread_name_prefix="CPUWorker") as executor:
+                # Create batches
+                batches = []
+                for i in range(0, len(texts), cpu_batch_size):
+                    batch_texts = texts[i:i + cpu_batch_size]
+                    batches.append(batch_texts)
                 
-                with torch.no_grad():
-                    embeddings = self.embedding_model.encode(
-                        batch_texts,
-                        convert_to_tensor=False,
-                        show_progress_bar=False,
-                        batch_size=cpu_batch_size,
-                        normalize_embeddings=True,
+                # Submit batch processing tasks
+                future_to_batch = {}
+                for i, batch in enumerate(batches):
+                    future = executor.submit(self._process_cpu_batch, batch, i)
+                    future_to_batch[future] = i
+                
+                # Collect results in order
+                batch_results = [None] * len(batches)
+                
+                for future in as_completed(future_to_batch):
+                    batch_index = future_to_batch[future]
+                    try:
+                        batch_embeddings = future.result(timeout=60)  # 60 second timeout per batch
+                        batch_results[batch_index] = batch_embeddings
+                        logger.debug(f"CPU batch {batch_index + 1}/{len(batches)} completed")
+                    except Exception as e:
+                        logger.error(f"CPU batch {batch_index + 1} failed: {e}")
+                        batch_results[batch_index] = []
+                
+                # Flatten results
+                for batch_embeddings in batch_results:
+                    if batch_embeddings:
+                        all_embeddings.extend(batch_embeddings)
+            
+            logger.info(f"CPU processing completed: {len(all_embeddings)} embeddings generated")
+            return all_embeddings
+            
+        except Exception as e:
+            logger.error(f"Error processing texts on CPU: {e}")
+            # Final fallback to sequential CPU processing
+            return self._sequential_cpu_fallback(texts)
+
+    def _process_cpu_batch(self, batch_texts: List[str], batch_id: int) -> List[List[float]]:
+        """Process a batch of texts on CPU"""
+        try:
+            with torch.no_grad():
+                # Ensure model is on CPU for this thread
+                if str(self.embedding_model.device) != "cpu":
+                    # Create a temporary CPU copy for this thread
+                    temp_model = SentenceTransformer(
+                        self.embedding_model.model_name or "Qwen/Qwen3-Embedding-0.6B",
                         device="cpu",
+                        trust_remote_code=True
                     )
+                else:
+                    temp_model = self.embedding_model
+                
+                embeddings = temp_model.encode(
+                    batch_texts,
+                    convert_to_tensor=False,
+                    show_progress_bar=False,
+                    batch_size=8,  # Reasonable CPU batch size
+                    normalize_embeddings=True,
+                    device="cpu",
+                )
                 
                 if hasattr(embeddings, "tolist"):
                     batch_embeddings = embeddings.tolist()
                 else:
                     batch_embeddings = list(embeddings)
                 
-                all_embeddings.extend(batch_embeddings)
-                
-                # Cleanup after each batch
-                del embeddings, batch_embeddings
+                # Cleanup
+                del embeddings
                 import gc
                 gc.collect()
+                
+                return batch_embeddings
+                
+        except Exception as e:
+            logger.error(f"Error in CPU batch {batch_id}: {e}")
+            return []
+
+    def _sequential_cpu_fallback(self, texts: List[str]) -> List[List[float]]:
+        """Final fallback: sequential CPU processing without threading"""
+        try:
+            logger.warning("Using sequential CPU fallback (no threading)")
+            
+            all_embeddings = []
+            
+            # Ensure model is on CPU
+            if str(self.embedding_model.device) != "cpu":
+                self.embedding_model = self.embedding_model.to("cpu")
+            
+            for i, text in enumerate(texts):
+                try:
+                    with torch.no_grad():
+                        embedding = self.embedding_model.encode(
+                            [text],
+                            convert_to_tensor=False,
+                            show_progress_bar=False,
+                            batch_size=1,
+                            normalize_embeddings=True,
+                            device="cpu",
+                        )
+                    
+                    if hasattr(embedding, "tolist"):
+                        embedding = embedding.tolist()
+                    else:
+                        embedding = list(embedding)
+                    
+                    all_embeddings.append(embedding[0])
+                    
+                    if i % 20 == 0 and i > 0:
+                        logger.debug(f"Sequential CPU fallback: {i}/{len(texts)} completed")
+                        import gc
+                        gc.collect()
+                        
+                except Exception as e:
+                    logger.error(f"Sequential fallback failed for text {i+1}: {e}")
+                    continue
             
             return all_embeddings
             
         except Exception as e:
-            logger.error(f"Error processing texts on CPU: {e}")
-            raise
+            logger.error(f"Sequential CPU fallback failed: {e}")
+            return []
 
     def process_document(
         self,

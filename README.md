@@ -168,6 +168,26 @@ Copy `.env.example` to `.env` and configure:
 - ChromaDB storage location
 - File upload limits and allowed types
 
+## Documentation
+
+### PDF Embedding Processing
+For comprehensive documentation on processing PDFs into vector embeddings:
+
+- **[📚 Complete Processing Guide](EMBEDDING_PROCESSING_GUIDE.md)** - Detailed documentation covering architecture, workflow, setup, and troubleshooting
+- **[⚡ Quick Reference](QUICK_REFERENCE.md)** - Commands, configurations, and common solutions for immediate use
+
+### Processing PDFs
+```bash
+# Check system capabilities and get recommendations
+python backend/config_parallel.py --info
+
+# Process all PDFs in /pdfs directory
+python backend/bulk_process.py --process
+
+# Check processing status
+python backend/bulk_process.py --check
+```
+
 ## Assumptions
 
 - All data must be machine-readable for LLMs.

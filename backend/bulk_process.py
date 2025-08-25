@@ -97,14 +97,20 @@ async def process_existing_pdfs():
 
     # Initialize processors with memory optimization
     try:
-        # ULTRA AGGRESSIVE: Force CPU mode for safety with 6GB GPU
-        force_cpu = os.getenv("FORCE_CPU_EMBEDDINGS", "true").lower() == "true"
-        logger.info(f"Initializing document processor (force_cpu={force_cpu})")
+        # PARALLEL PROCESSING: Configure for efficiency with memory safety
+        force_cpu = os.getenv("FORCE_CPU_EMBEDDINGS", "false").lower() == "true"
+        max_workers = int(os.getenv("EMBEDDING_MAX_WORKERS", "0"))  # 0 = auto-detect
         
-        # Pass memory config to document processor
-        doc_processor = DocumentProcessor(memory_config=memory_config, force_cpu=force_cpu)
+        logger.info(f"Initializing document processor with parallel processing (force_cpu={force_cpu}, max_workers={max_workers or 'auto'})")
+        
+        # Pass memory config and parallel processing settings to document processor
+        doc_processor = DocumentProcessor(
+            memory_config=memory_config, 
+            force_cpu=force_cpu,
+            max_workers=max_workers if max_workers > 0 else None
+        )
         summarizer = DocumentSummarizer()
-        logger.info("Document processors initialized successfully with ultra-memory optimization")
+        logger.info("Document processors initialized successfully with parallel embedding generation")
         
         if memory_monitor:
             memory_monitor.log_memory_usage("after processor initialization")

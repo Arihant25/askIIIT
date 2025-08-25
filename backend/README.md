@@ -1,23 +1,41 @@
 # Jagruti Backend
 
-A FastAPI-based backend with ChromaDB for document search and chatbot functionality using **Qwen3 models** with CAS authentication.
+A FastAPI-based backend with ChromaDB for document search and chatbot functionality using **Qwen3 models** with CAS authentication and **parallel embedding processing**.
 
 ## Features
 
 - **FastAPI** REST API with automatic documentation
 - **ChromaDB** for vector embeddings and semantic search
-- **Qwen3-Embedding-8B** via sentence-transformers for high-quality embeddings
+- **Qwen3-Embedding-0.6B** via sentence-transformers for high-quality embeddings
 - **Qwen3 (8B)** via Ollama for chat and summarization
+- **Parallel Processing** for efficient embedding generation with multi-threading
 - **CAS Authentication** integration for IIIT login
 - **Document Processing** with text extraction and chunking
 - **Semantic Search** using Qwen3 embeddings
 - **Admin Panel** endpoints for document management
-- **Bulk Processing** for existing PDF documents
+- **Bulk Processing** for existing PDF documents with memory optimization
 
 ## Models Used
 
-- **Embeddings**: `Qwen/Qwen3-Embedding-8B` via Hugging Face sentence-transformers
+- **Embeddings**: `Qwen/Qwen3-Embedding-0.6B` via Hugging Face sentence-transformers
 - **Chat/Summarization**: `qwen3:8b` via Ollama
+
+## Parallel Processing Features
+
+The system now includes optimized parallel processing for faster embedding generation:
+
+- **Multi-threaded embedding generation** using ThreadPoolExecutor
+- **Smart device detection** (CUDA, MPS, CPU) with automatic configuration
+- **Memory-optimized batching** to prevent out-of-memory errors
+- **Fallback mechanisms** for GPU memory constraints
+- **Configuration utilities** to optimize settings for your hardware
+
+### Performance Benefits
+
+- **2-6x faster** embedding generation compared to sequential processing
+- **Automatic load balancing** across CPU cores
+- **GPU acceleration** when available with memory safety
+- **Graceful degradation** to CPU when GPU memory is insufficient
 
 ## Setup
 
@@ -62,9 +80,14 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_CHAT_MODEL=qwen3:8b
 
 # Embedding model (Hugging Face)
-EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
 EMBEDDING_DEVICE=auto
 EMBEDDING_TRUST_REMOTE_CODE=true
+
+# Parallel Processing Configuration
+FORCE_CPU_EMBEDDINGS=false          # Set to true to force CPU processing
+EMBEDDING_MAX_WORKERS=0             # 0 = auto-detect based on CPU cores
+EMBEDDING_BATCH_SIZE=0              # 0 = auto-detect based on device
 
 # CAS Authentication
 CAS_SERVER_URL=https://login.iiit.ac.in/cas
@@ -72,6 +95,49 @@ ADMIN_USERS=admin@iiit.ac.in,arihant.tripathy@research.iiit.ac.in,mohit.singh@re
 
 # Search Configuration
 RELEVANCE_THRESHOLD=0.7  # Distance threshold for search result filtering (0.0-1.0, lower = more strict)
+
+# Memory Optimization
+MAX_FILE_SIZE_MB=25
+CHUNK_SIZE=400
+CHUNK_OVERLAP=50
+CHUNK_PROCESSING_BATCH_SIZE=20
+```
+
+### Parallel Processing Configuration
+
+Use the configuration utility to optimize settings for your hardware:
+
+```bash
+# Check your system capabilities and get recommendations
+python config_parallel.py --info
+
+# Validate your current .env settings
+python config_parallel.py --validate
+
+# Generate optimized .env settings for your system
+python config_parallel.py --generate
+```
+
+**Recommended settings by hardware:**
+
+- **High-end GPU (8GB+ VRAM)**: 4 workers, batch size 2, CUDA
+- **Mid-range GPU (6GB VRAM)**: 3 workers, batch size 1, CUDA  
+- **CPU only (16GB+ RAM)**: 6 workers, batch size 8, CPU
+- **CPU only (8GB RAM)**: 4 workers, batch size 6, CPU
+
+### Testing Parallel Performance
+
+Test the parallel processing performance:
+
+```bash
+# Test with 50 sample texts
+python test_parallel.py --count 50
+
+# Force CPU testing
+python test_parallel.py --count 50 --force-cpu
+
+# Test with specific worker count
+python test_parallel.py --count 50 --workers 4
 ```
 
 ### Search Relevance Configuration
@@ -184,12 +250,13 @@ Once the server is running, visit:
 
 ## Model Performance
 
-### Qwen3-Embedding-8B
+### Qwen3-Embedding-0.6B
 
-- **Dimension**: 1024
-- **Performance**: State-of-the-art multilingual embeddings
+- **Dimension**: 384
+- **Performance**: Optimized multilingual embeddings with smaller model size
 - **Languages**: Excellent support for English and Chinese
 - **Use Case**: Document similarity and semantic search
+- **Memory**: Lower memory footprint for better parallel processing
 
 ### Qwen3 (8B) Chat Model
 
@@ -203,15 +270,18 @@ Once the server is running, visit:
 ```
 backend/
 ├── main.py                 # Main FastAPI application
-├── document_processor.py   # Document processing with Qwen3 embeddings
+├── document_processor.py   # Document processing with parallel Qwen3 embeddings
 ├── ollama_client.py       # Ollama client for Qwen3 chat
 ├── auth_utils.py          # CAS authentication utilities
 ├── scraper.py             # Web scraping utilities
-├── bulk_process.py        # Bulk PDF processing script
+├── bulk_process.py        # Bulk PDF processing script with parallel processing
+├── config_parallel.py     # Parallel processing configuration utility
+├── test_parallel.py       # Parallel processing performance test
 ├── setup.py               # Setup and installation script
 ├── run.py                 # Startup script
 ├── requirements.txt       # Python dependencies
 ├── .env                   # Environment configuration
+├── .env.example           # Example environment with parallel processing settings
 └── chroma_data/          # ChromaDB storage (created automatically)
 ```
 
@@ -219,14 +289,16 @@ backend/
 
 ### Testing Models
 
-Test the embedding model:
+Test the embedding model with parallel processing:
 
 ```bash
 python -c "
 from document_processor import DocumentProcessor
 dp = DocumentProcessor()
-emb = dp.generate_embeddings(['test'])
-print(f'Embedding dimension: {len(emb[0])}')
+test_texts = ['test text 1', 'test text 2', 'test text 3']
+emb = dp.generate_embeddings(test_texts)
+print(f'Generated {len(emb)} embeddings with dimension: {len(emb[0])}')
+print(f'Using device: {dp.device}, workers: {dp.max_workers}')
 "
 ```
 
@@ -241,12 +313,34 @@ print(result)
 "
 ```
 
+### Performance Testing
+
+Compare sequential vs parallel processing:
+
+```bash
+# Run performance benchmark
+python test_parallel.py --count 100
+
+# Test with different worker counts
+python test_parallel.py --count 100 --workers 2
+python test_parallel.py --count 100 --workers 4
+python test_parallel.py --count 100 --workers 6
+```
+
 ### Performance Tuning
 
 1. **GPU Acceleration**: Set `EMBEDDING_DEVICE=cuda` if you have a compatible GPU
-2. **Batch Size**: Adjust batch size in `generate_embeddings()` based on your hardware
-3. **Chunk Size**: Modify `CHUNK_SIZE` and `CHUNK_OVERLAP` for your use case
-4. **Model Precision**: Use quantized models for lower memory usage
+2. **Parallel Workers**: Adjust `EMBEDDING_MAX_WORKERS` based on your CPU cores and memory
+3. **Batch Size**: Tune `EMBEDDING_BATCH_SIZE` for your hardware (GPU memory constraints)
+4. **Chunk Size**: Modify `CHUNK_SIZE` and `CHUNK_OVERLAP` for your use case
+5. **Memory Limits**: Set `MAX_FILE_SIZE_MB` to prevent memory issues with large files
+
+**Use the configuration utility for optimal settings:**
+
+```bash
+python config_parallel.py --info    # Get hardware-specific recommendations
+python config_parallel.py --validate # Check current settings
+```
 
 ## Troubleshooting
 

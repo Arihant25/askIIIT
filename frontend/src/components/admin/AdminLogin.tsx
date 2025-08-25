@@ -30,7 +30,7 @@ export default function AdminLogin({ onLogin, error }: AdminLoginProps) {
 
                 <button
                     onClick={onLogin}
-                    className="w-full bg-[#60a5fa] hover:bg-[#3b82f6] text-white font-medium py-3 px-4 rounded-lg transition-colors"
+                    className="w-full bg-[#3b82f6] hover:bg-[#60a5fa] text-white font-medium py-3 px-4 rounded-lg transition-colors cursor-pointer"
                 >
                     Sign in with CAS
                 </button>
