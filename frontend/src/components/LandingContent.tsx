@@ -42,7 +42,10 @@ const LandingContent: React.FC<LandingContentProps> = ({
               for IIIT
             </span>
           </h1>
-
+          
+            <p>
+              Jagruti is a LLM at heart, and has a tendency to make mistakes. We recommend verifying results with provided references.
+            </p>
 
         </div>
       </div>

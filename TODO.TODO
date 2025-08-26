@@ -1,3 +1,2 @@
 0. Store dates of pdf and author and links and other metadata in the database.
-2. Add a disclaimer for AI Generated content.
 4. Ensure that a maximum of last 10 messages are sent in conversation context (can finetune depending on available hardware)
