@@ -76,7 +76,7 @@ class DocumentCategory(str):
 class DocumentMetadata(BaseModel):
     doc_id: str
     name: str
-    category: str
+    categories: List[str]  # Updated to support multiple categories
     description: str
     created_at: datetime
     updated_at: datetime
@@ -238,7 +238,26 @@ try:
         metadata={"description": "Document chunks with embeddings",
                   "hnsw:space": "cosine"}
     )
-    logger.info("ChromaDB collections initialized successfully")
+    
+    # New collection for document summaries - for faster first-stage retrieval
+    summaries_collection = chroma_client.get_or_create_collection(
+        name="summaries",
+        embedding_function=embedding_function,
+        metadata={"description": "Document summaries with embeddings",
+                  "hnsw:space": "cosine"}
+    )
+    
+    # Initialize RAG pipeline
+    from rag_pipeline import RAGPipeline
+    rag_pipeline = RAGPipeline(
+        summaries_collection=summaries_collection,
+        chunks_collection=chunks_collection,
+        default_top_k=5,
+        summary_threshold=float(os.getenv("SUMMARY_THRESHOLD", "0.7")),
+        content_threshold=float(os.getenv("CONTENT_THRESHOLD", "0.65"))
+    )
+    
+    logger.info("ChromaDB collections and RAG pipeline initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize collections: {e}")
     raise
@@ -409,6 +428,7 @@ async def upload_document(
     try:
         # Import document processor here to avoid circular imports
         from document_processor import DocumentProcessor, DocumentSummarizer
+        from document_summarizer import DocumentSummaryProcessor
 
         # Validate file type
         allowed_extensions = os.getenv(
@@ -437,6 +457,7 @@ async def upload_document(
         # Initialize processors
         doc_processor = DocumentProcessor()
         summarizer = DocumentSummarizer()
+        summary_processor = DocumentSummaryProcessor()
 
         # Auto-generate description if not provided
         if not description:
@@ -461,15 +482,50 @@ async def upload_document(
             documents_collection=documents_collection,
             chunks_collection=chunks_collection,
         )
+        
+        # Extract the full text for category detection
+        full_text = doc_processor.extract_text_from_file(file_content, file.filename)
+        
+        # Get multiple categories for the document
+        categories = await summarizer.categorize_document_async(file.filename, full_text[:5000])
+        
+        # If only single category is returned, convert to list
+        if isinstance(categories, str):
+            categories = [categories]
+            
+        # Add the explicitly provided category if not already included
+        if category not in categories:
+            categories.append(category)
+            
+        # Process document summary for each category
+        summary_result = summary_processor.process_document_summary(
+            doc_id=doc_id,
+            text=full_text,
+            filename=file.filename,
+            categories=categories,
+            summaries_collection=summaries_collection
+        )
+        
+        # Update document metadata with categories
+        doc_metadata = documents_collection.get(
+            ids=[doc_id],
+            include=["metadatas"]
+        )["metadatas"][0]
+        
+        updated_metadata = {**doc_metadata, "categories": categories}
+        documents_collection.update(
+            ids=[doc_id],
+            metadatas=[updated_metadata]
+        )
 
-        logger.info(
-            f"Document {file.filename} processed successfully: {result}")
+        logger.info(f"Document {file.filename} processed successfully with categories: {categories}")
 
         return {
             "message": "Document uploaded and processed successfully",
             "doc_id": doc_id,
             "filename": file.filename,
             "chunk_count": result["chunk_count"],
+            "categories": categories,
             "status": "completed",
         }
 
@@ -491,13 +547,34 @@ async def list_documents(
     try:
         # Query documents collection
         where_clause = {}
+        
         if categories:
             # Support both single category (backward compatibility) and comma-separated categories
             category_list = [cat.strip() for cat in categories.split(",")]
+            
+            # For multiple categories, return ANY category matches
             if len(category_list) == 1:
-                where_clause["category"] = category_list[0]
+                where_clause["categories"] = {"$contains": category_list[0]}
             else:
-                where_clause["category"] = {"$in": category_list}
+                summary_results = summaries_collection.get(
+                    where={"category": {"$in": category_list}},
+                    include=["metadatas"]
+                )
+                
+                if summary_results["metadatas"]:
+                    # Extract unique document IDs
+                    doc_ids = {meta.get("doc_id") for meta in summary_results["metadatas"] if meta.get("doc_id")}
+                    
+                    if doc_ids:
+                        where_clause["doc_id"] = {"$in": list(doc_ids)}
+                    else:
+                        # No matching documents
+                        return {
+                            "documents": [],
+                            "total": 0,
+                            "limit": limit,
+                            "offset": offset,
+                        }
 
         results = documents_collection.get(
             where=where_clause if where_clause else None, limit=limit, offset=offset
@@ -524,6 +601,15 @@ async def list_documents(
                     "embedding_count": chunk_count,
                     "status": "processed",
                 }
+                
+                # Ensure categories field exists
+                if "categories" not in enhanced_doc:
+                    # If only old "category" field exists, convert to list
+                    if "category" in enhanced_doc:
+                        enhanced_doc["categories"] = [enhanced_doc["category"]]
+                    else:
+                        enhanced_doc["categories"] = ["unknown"]
+                
                 enhanced_documents.append(enhanced_doc)
 
         return {
@@ -542,46 +628,26 @@ async def list_documents(
 async def search_documents(
     query_request: QueryRequest, current_user: UserInfo = Depends(get_current_user)
 ):
-    """Search documents using semantic search"""
+    """Search documents using two-stage RAG pipeline"""
     try:
-        # Build where clause for filtering
-        where_clause = {}
-        if query_request.categories:
-            if len(query_request.categories) == 1:
-                where_clause["category"] = query_request.categories[0]
-            else:
-                where_clause["category"] = {"$in": query_request.categories}
-
-        # Perform semantic search on chunks with relevance filtering
-        results = chunks_collection.query(
-            query_texts=[query_request.query],
-            n_results=query_request.limit or 10,
-            where=where_clause if where_clause else None,
+        # Execute the full RAG pipeline
+        results = await rag_pipeline.retrieve(
+            query=query_request.query,
+            categories=query_request.categories,
+            top_k=query_request.limit or 10,
+            include_summaries=True
         )
-
-        # Filter and format results with relevance scores
-        formatted_results = []
-        if results["documents"] and results["distances"]:
-            for chunk_id, document, metadata, distance in zip(
-                results["ids"][0],
-                results["documents"][0],
-                results["metadatas"][0],
-                results["distances"][0],
-            ):
-                # Only include results with reasonable relevance
-                if distance <= 0.8:  # Adjust threshold as needed
-                    formatted_results.append({
-                        "chunk_id": chunk_id,
-                        "text": document,
-                        "metadata": metadata,
-                        "distance": distance,
-                        "relevance_score": round(1.0 - distance, 3),
-                    })
-
+        
+        # Format results for API response
+        formatted_docs = results["documents"]
+        formatted_chunks = results["chunks"]
+        
         return {
             "query": query_request.query,
-            "results": formatted_results,
-            "total_found": len(formatted_results),
+            "documents": formatted_docs,
+            "content_chunks": formatted_chunks,
+            "total_docs": len(formatted_docs),
+            "total_chunks": len(formatted_chunks),
         }
     except Exception as e:
         logger.error(f"Error performing search: {e}")
@@ -595,61 +661,46 @@ async def chat_with_documents(chat_request: ChatRequest):
         # Import Ollama client
         from ollama_client import ollama_client
 
-        # First, search for relevant documents
-        where_clause = {}
-        if chat_request.categories:
-            if len(chat_request.categories) == 1:
-                where_clause["category"] = chat_request.categories[0]
-            else:
-                where_clause["category"] = {"$in": chat_request.categories}
-
-        search_results = chunks_collection.query(
-            query_texts=[chat_request.message],
-            n_results=10,  # Get more results to filter by relevance
-            where=where_clause if where_clause else None,
+        # Process conversation context for enhanced RAG retrieval
+        enhanced_query = chat_request.message
+        if chat_request.conversation_history:
+            # Convert ChatMessage objects to dictionaries for processing
+            conv_history = [
+                {"type": msg.type, "content": msg.content}
+                for msg in chat_request.conversation_history
+            ]
+            
+            # Include conversation context in the query
+            enhanced_query = rag_pipeline.process_conversation_context(
+                current_message=chat_request.message,
+                conversation_history=conv_history,
+                max_history=5  # Include up to 5 previous messages
+            )
+        
+        # Execute the RAG pipeline with the enhanced query
+        rag_results = await rag_pipeline.retrieve(
+            query=enhanced_query,
+            categories=chat_request.categories,
+            top_k=5,  # Get top 5 most relevant chunks
+            include_summaries=False  # Don't need summaries for chat
         )
-
-        # Filter results by relevance score (distance threshold)
-        # Lower distance = higher similarity
-        relevance_threshold = float(
-            os.getenv("RELEVANCE_THRESHOLD", "0.69"))  # Configurable threshold
-
+        
+        # Extract the relevant content chunks
         context_chunks = []
         context_metadata = []
-
-        if search_results["documents"] and search_results["distances"]:
-            logger.info(
-                f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-
-            for i, (doc, metadata, distance) in enumerate(zip(
-                search_results["documents"][0],
-                search_results["metadatas"][0],
-                search_results["distances"][0]
-            )):
-                logger.debug(
-                    f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-
-                # Only include chunks that are sufficiently relevant
-                if distance <= relevance_threshold:
-                    context_chunks.append(doc)
-                    context_metadata.append(metadata)
-                    logger.debug(
-                        f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
-                else:
-                    logger.debug(
-                        f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-
-                # Limit to top 5 relevant results
-                if len(context_chunks) >= 5:
-                    break
-
-            logger.info(
-                f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
-        else:
-            logger.warning(
-                f"No search results found for query: '{chat_request.message}'")
-
+        
+        if rag_results["chunks"]:
+            for chunk in rag_results["chunks"]:
+                context_chunks.append(chunk["text"])
+                context_metadata.append({
+                    "doc_id": chunk["doc_id"],
+                    "filename": chunk["filename"],
+                    "category": chunk["category"],
+                    "relevance_score": chunk["relevance_score"],
+                })
+        
         # Prepare system prompt for Qwen3 with conversation history
+        # TODO: Verify system prompt
         base_system_prompt = (
             f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
             f"You help students, faculty, and staff find information from official documents. "
@@ -691,21 +742,14 @@ async def chat_with_documents(chat_request: ChatRequest):
 
         # Prepare context information for frontend with actual relevance scores
         context_info = []
-        search_distances = search_results.get("distances", [[]])[
-            0] if search_results.get("distances") else []
-
         for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
-            # Calculate relevance score (1 - distance) for display
-            relevance_score = 1.0 - \
-                search_distances[i] if i < len(search_distances) else 1.0
-
             context_info.append(
                 {
                     "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
                     "filename": metadata.get("filename", "Unknown"),
                     "category": metadata.get("category", "Unknown"),
                     "doc_id": metadata.get("doc_id", ""),
-                    "relevance_score": round(relevance_score, 3),
+                    "relevance_score": metadata.get("relevance_score", 0),
                 }
             )
 
@@ -747,78 +791,62 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
             # Import Ollama client
             from ollama_client import ollama_client
 
-            # First, search for relevant documents
-            where_clause = {}
-            if chat_request.categories:
-                if len(chat_request.categories) == 1:
-                    where_clause["category"] = chat_request.categories[0]
-                else:
-                    where_clause["category"] = {"$in": chat_request.categories}
-
-            search_results = chunks_collection.query(
-                query_texts=[chat_request.message],
-                n_results=10,  # Get more results to filter by relevance
-                where=where_clause if where_clause else None,
+            # Process conversation context for enhanced RAG retrieval
+            enhanced_query = chat_request.message
+            if chat_request.conversation_history:
+                # Convert ChatMessage objects to dictionaries for processing
+                conv_history = [
+                    {"type": msg.type, "content": msg.content}
+                    for msg in chat_request.conversation_history
+                ]
+                
+                # Include conversation context in the query
+                enhanced_query = rag_pipeline.process_conversation_context(
+                    current_message=chat_request.message,
+                    conversation_history=conv_history,
+                    max_history=5  # Include up to 5 previous messages
+                )
+            
+            # Execute the RAG pipeline with the enhanced query
+            rag_results = await rag_pipeline.retrieve(
+                query=enhanced_query,
+                categories=chat_request.categories,
+                top_k=5,  # Get top 5 most relevant chunks
+                include_summaries=False  # Don't need summaries for chat
             )
 
-            # Filter results by relevance score (distance threshold)
-            # Lower distance = higher similarity
-            relevance_threshold = float(
-                # Configurable threshold
-                os.getenv("RELEVANCE_THRESHOLD", "0.7"))
-
+            # Execute the RAG pipeline with the enhanced query
+            rag_results = await rag_pipeline.retrieve(
+                query=enhanced_query,
+                categories=chat_request.categories,
+                top_k=5,  # Get top 5 most relevant chunks
+                include_summaries=False  # Don't need summaries for chat
+            )
+            
+            # Extract the relevant content chunks
             context_chunks = []
             context_metadata = []
+            
+            if rag_results["chunks"]:
+                for chunk in rag_results["chunks"]:
+                    context_chunks.append(chunk["text"])
+                    context_metadata.append({
+                        "doc_id": chunk["doc_id"],
+                        "filename": chunk["filename"],
+                        "category": chunk["category"],
+                        "relevance_score": chunk["relevance_score"],
+                    })
 
-            if search_results["documents"] and search_results["distances"]:
-                logger.info(
-                    f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-
-                for i, (doc, metadata, distance) in enumerate(zip(
-                    search_results["documents"][0],
-                    search_results["metadatas"][0],
-                    search_results["distances"][0]
-                )):
-                    logger.debug(
-                        f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-
-                    # Only include chunks that are sufficiently relevant
-                    if distance <= relevance_threshold:
-                        context_chunks.append(doc)
-                        context_metadata.append(metadata)
-                        logger.debug(
-                            f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
-                    else:
-                        logger.debug(
-                            f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-
-                    # Limit to top 5 relevant results
-                    if len(context_chunks) >= 5:
-                        break
-
-                logger.info(
-                    f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
-            else:
-                logger.warning(
-                    f"No search results found for query: '{chat_request.message}'")
-
-            # Send context information first with actual relevance scores
+            # Send context information first
             context_info = []
-            search_distances = search_results.get("distances", [[]])[
-                0] if search_results.get("distances") else []
-
             for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
-                # Calculate relevance score (1 - distance) for display
-                relevance_score = 1.0 - \
-                    search_distances[i] if i < len(search_distances) else 1.0
-
                 context_info.append(
                     {
                         "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
                         "filename": metadata.get("filename", "Unknown"),
                         "category": metadata.get("category", "Unknown"),
                         "doc_id": metadata.get("doc_id", ""),
-                        "relevance_score": round(relevance_score, 3),
+                        "relevance_score": metadata.get("relevance_score", 0),
                     }
                 )
 
@@ -1373,6 +1401,57 @@ async def get_document_details(
         raise
     except Exception as e:
         logger.error(f"Error getting document details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/debug/rag-diagnostics")
+async def debug_rag_diagnostics(
+    query: str = "test query",
+    current_user: UserInfo = Depends(get_admin_user)
+):
+    """Debug endpoint for RAG pipeline diagnostics (Admin only)"""
+    try:
+        # Get collection counts
+        summaries_count = summaries_collection.count()
+        chunks_count = chunks_collection.count()
+        documents_count = documents_collection.count()
+        
+        # Sample summaries
+        sample_summaries = summaries_collection.get(
+            limit=5,
+            include=["metadatas", "documents"]
+        )
+        
+        # Run a simple RAG query
+        rag_results = await rag_pipeline.retrieve(
+            query=query,
+            categories=None,
+            top_k=5,
+            include_summaries=True
+        )
+        
+        return {
+            "collections": {
+                "documents": documents_count,
+                "chunks": chunks_count,
+                "summaries": summaries_count,
+            },
+            "sample_summaries": {
+                "count": len(sample_summaries["ids"]) if sample_summaries["ids"] else 0,
+                "ids": sample_summaries["ids"] if sample_summaries["ids"] else [],
+                "categories": [m.get("category", "unknown") for m in sample_summaries["metadatas"]] if sample_summaries["metadatas"] else [],
+                "doc_ids": [m.get("doc_id", "unknown") for m in sample_summaries["metadatas"]] if sample_summaries["metadatas"] else [],
+            },
+            "rag_results": {
+                "query": query,
+                "docs_found": len(rag_results.get("documents", [])),
+                "chunks_found": len(rag_results.get("chunks", [])),
+                "results": rag_results
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in RAG diagnostics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

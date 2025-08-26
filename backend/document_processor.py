@@ -785,15 +785,20 @@ class DocumentProcessor:
                 "updated_at": datetime.now().isoformat(),
             }
 
+            # TODO: Verify the concept of dummy embedding
             # Create a dummy embedding for the document (ChromaDB requires it)
             dummy_embedding = [0.0] * 384  # Standard embedding dimension
 
+            # Store the full document text in the documents collection
             documents_collection.add(
                 ids=[doc_id],
-                documents=[text[:1000]],  # Store first 1000 chars as summary
+                documents=[text],
                 embeddings=[dummy_embedding],  # Provide dummy embedding
                 metadatas=[doc_metadata],
             )
+
+            # Log document size
+            logger.info(f"Stored full document '{filename}' with {len(text)} characters")
 
             # MEMORY OPTIMIZATION: Clear remaining variables
             del text, chunks

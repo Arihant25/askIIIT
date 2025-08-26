@@ -197,14 +197,11 @@ async def process_existing_pdfs():
 
             # Auto-categorize the document with memory optimization
             try:
-                # MEMORY OPTIMIZATION: Use only a small sample for categorization
-                sample_text = doc_processor.extract_text_from_file(
-                    file_content[:100000], pdf_file.name  # Only first 100KB for sampling
-                )
-                category = summarizer.categorize_document(
-                    pdf_file.name, sample_text[:1000]
-                )
-                description = summarizer.generate_summary(sample_text[:2000])
+                # MEMORY OPTIMIZATION: Use only a small sample (first 100KB)
+                # TODO: confirm if needed
+                sample_text = doc_processor.extract_text_from_file(file_content[:100000], pdf_file.name)
+                category = summarizer.categorize_document(pdf_file.name, sample_text)
+                description = summarizer.generate_summary(sample_text)
                 logger.info(
                     f"Auto-categorized {pdf_file.name} as '{category}'")
 

@@ -1,105 +1,67 @@
 """
-Startup script for Jagruti backend
+Initializes the Jagruti backend API with database migrations
 """
 
-from colored_logging import setup_logging
 import asyncio
 import os
-import sys
 import logging
+import uvicorn
+from dotenv import load_dotenv
 from pathlib import Path
 
-# Add backend directory to Python path
-backend_dir = Path(__file__).parent
-sys.path.insert(0, str(backend_dir))
-
-
+# Configure logging
+from colored_logging import setup_logging
 setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_dotenv()
 
-async def setup_environment():
-    """Setup environment and check dependencies"""
-    logger.info("Setting up Jagruti backend environment...")
-
-    # Check if .env file exists
-    env_file = backend_dir / ".env"
-    if not env_file.exists():
-        logger.warning(".env file not found. Using default configuration.")
-
-    # Check ChromaDB data directory
-    chroma_dir = backend_dir / "chroma_data"
-    if not chroma_dir.exists():
-        chroma_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created ChromaDB data directory: {chroma_dir}")
-
-    # Check if pdfs directory exists
-    pdfs_dir = backend_dir.parent / "pdfs"
-    if pdfs_dir.exists() and any(pdfs_dir.glob("*.pdf")):
-        logger.info(
-            f"Found {len(list(pdfs_dir.glob('*.pdf')))} PDF files for processing"
+async def main():
+    """Run migrations and start the API server"""
+    try:
+        # Create a migration flag file to track if migration has been run
+        migration_flag_file = Path(os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_data")) / "migration_completed"
+        
+        # Only run migrations if the flag file doesn't exist
+        if not migration_flag_file.exists():
+            logger.info("Running database migrations...")
+            from migrate_database import migrate_database
+            migration_result = await migrate_database()
+            logger.info(f"Migration completed: {migration_result}")
+            
+            # Create the flag file to indicate migration has been completed
+            migration_flag_file.parent.mkdir(parents=True, exist_ok=True)
+            migration_flag_file.touch()
+            logger.info(f"Created migration flag file: {migration_flag_file}")
+        else:
+            logger.info("Migrations already completed, skipping")
+        
+        # Start the API server
+        logger.info("Starting API server...")
+        
+        # Import and run the main app
+        import main
+        
+        # Run the server
+        host = os.getenv("HOST", "0.0.0.0")
+        port = int(os.getenv("PORT", 8000))
+        reload = os.getenv("DEBUG", "True").lower() == "true"
+        
+        logger.info(f"Starting server on {host}:{port} (reload={reload})")
+        
+        # Use uvicorn to run the server
+        uvicorn.run(
+            "main:app",
+            host=host,
+            port=port,
+            reload=reload,
         )
-    else:
-        logger.info("No PDF files found in pdfs directory")
-
-    logger.info("Environment setup complete!")
-
-
-def check_dependencies():
-    """Check if required packages are installed"""
-    required_packages = [
-        "fastapi",
-        "uvicorn",
-        "chromadb",
-        "pydantic",
-        "httpx",
-        "sentence-transformers",
-    ]
-
-    missing_packages = []
-
-    for package in required_packages:
-        try:
-            __import__(package.replace("-", "_"))
-        except ImportError:
-            missing_packages.append(package)
-
-    if missing_packages:
-        logger.error(
-            f"Missing required packages: {', '.join(missing_packages)}")
-        logger.error(
-            "Please install dependencies using: pip install -r requirements.txt"
-        )
-        return False
-
-    logger.info("All required packages are installed!")
-    return True
-
-
-def main():
-    """Main startup function"""
-    logger.info("Starting Jagruti backend...")
-
-    # Check dependencies first
-    if not check_dependencies():
-        sys.exit(1)
-
-    # Setup environment
-    asyncio.run(setup_environment())
-
-    # Start the FastAPI application
-    import uvicorn
-    from main import app
-
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
-    debug = os.getenv("DEBUG", "True").lower() == "true"
-
-    logger.info(f"Starting server on {host}:{port} (debug={debug})")
-
-    uvicorn.run("main:app", host=host, port=port,
-                reload=debug, log_level="info")
-
+        
+    except Exception as e:
+        logger.error(f"Error initializing backend: {e}")
+        raise
 
 if __name__ == "__main__":
-    main()
+    # Run the main function with asyncio
+    asyncio.run(main())
