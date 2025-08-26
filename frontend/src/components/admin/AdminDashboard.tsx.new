@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
     Users,
-    FileText,
+    FileText, 
     LogOut,
     AlertCircle,
     BarChart3,
@@ -91,7 +91,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         loadSystemInfo();
         loadDocuments();
         loadLogs();
-
+        
         if (autoRefresh) {
             const interval = setInterval(() => {
                 loadSystemInfo();
@@ -125,11 +125,11 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
         try {
             const params = new URLSearchParams();
             params.append('lines', '500'); // Get more logs
-
+            
             const response = await fetch(`/api/admin/logs?${params.toString()}`, {
                 credentials: 'include',
             });
-
+            
             if (response.ok) {
                 const data = await response.json();
                 setLogs(data.logs || []);
@@ -273,7 +273,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
 
                 {/* Tab Content */}
                 {activeTab === "overview" && (
-                    <OverviewTab
+                    <OverviewTab 
                         systemInfo={systemInfo}
                         autoRefresh={autoRefresh}
                         setAutoRefresh={setAutoRefresh}
@@ -288,7 +288,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 )}
 
                 {activeTab === "documents" && (
-                    <DocumentsTab
+                    <DocumentsTab 
                         documents={documents}
                         loading={loading}
                         uploadFiles={uploadFiles}
@@ -303,7 +303,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 )}
 
                 {activeTab === "logs" && (
-                    <LogsTab
+                    <LogsTab 
                         logs={logs}
                         autoRefresh={autoRefresh}
                         setAutoRefresh={setAutoRefresh}
@@ -312,7 +312,7 @@ export default function AdminDashboard({ user }: AdminDashboardProps) {
                 )}
 
                 {activeTab === "users" && (
-                    <UsersTab
+                    <UsersTab 
                         user={user}
                     />
                 )}
