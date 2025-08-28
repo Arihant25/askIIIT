@@ -1,0 +1,26 @@
+# Load testing dependencies
+locust
+requests
+faker
+pydantic
+python-dotenv
+
+# Additional testing tools
+pytest
+pytest-asyncio
+aiohttp
+websockets
+
+# Data generation and utilities
+numpy
+pandas
+matplotlib
+seaborn
+
+# Performance monitoring
+psutil
+memory-profiler
+
+# Report generation
+jinja2
+plotly
