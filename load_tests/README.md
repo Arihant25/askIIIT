@@ -43,6 +43,8 @@ This directory contains comprehensive load testing tools for the askIIIT applica
 - askIIIT backend running on `http://localhost:8000`
 
 ### Installation
+
+#### Windows (PowerShell)
 ```powershell
 # Install dependencies
 .\run_tests.ps1 -Install
@@ -51,9 +53,20 @@ This directory contains comprehensive load testing tools for the askIIIT applica
 pip install -r requirements.txt
 ```
 
+#### Linux/macOS (Bash)
+```bash
+# Install dependencies
+./run_tests.sh --install
+
+# Or manually:
+pip install -r requirements.txt
+```
+
 ### Basic Usage
 
-#### Run Locust Tests (Recommended for beginners)
+#### Windows (PowerShell)
+
+##### Run Locust Tests (Recommended for beginners)
 ```powershell
 # Basic load test with web UI
 .\run_tests.ps1 -TestType locust -WebUI
@@ -62,14 +75,35 @@ pip install -r requirements.txt
 .\run_tests.ps1 -TestType locust -Users 20 -Duration 300
 ```
 
-#### Run Performance Tests
+##### Run Performance Tests
 ```powershell
 .\run_tests.ps1 -TestType performance
 ```
 
-#### Run All Tests
+##### Run All Tests
 ```powershell
 .\run_tests.ps1 -TestType all
+```
+
+#### Linux/macOS (Bash)
+
+##### Run Locust Tests (Recommended for beginners)
+```bash
+# Basic load test with web UI
+./run_tests.sh --test-type locust --web-ui
+
+# Headless load test
+./run_tests.sh --test-type locust --users 20 --duration 300
+```
+
+##### Run Performance Tests
+```bash
+./run_tests.sh --test-type performance
+```
+
+##### Run All Tests
+```bash
+./run_tests.sh --test-type all
 ```
 
 ## Detailed Usage
@@ -103,27 +137,59 @@ config.spawn_rate = 2   # Users spawned per second
 ### Advanced Testing Scenarios
 
 #### 1. Normal Load Testing
+
+##### Windows (PowerShell)
 ```powershell
 # Simulate 50 concurrent users for 10 minutes
 .\run_tests.ps1 -TestType locust -Users 50 -Duration 600
 ```
 
+##### Linux/macOS (Bash)
+```bash
+# Simulate 50 concurrent users for 10 minutes
+./run_tests.sh --test-type locust --users 50 --duration 600
+```
+
 #### 2. Stress Testing
+
+##### Windows (PowerShell)
 ```powershell
 # Test system limits
 .\run_tests.ps1 -TestType stress
 ```
 
+##### Linux/macOS (Bash)
+```bash
+# Test system limits
+./run_tests.sh --test-type stress
+```
+
 #### 3. Endurance Testing
+
+##### Windows (PowerShell)
 ```powershell
 # Long-running test (modify stress_tests.py)
 python stress_tests.py  # Choose option 3 for endurance
 ```
 
+##### Linux/macOS (Bash)
+```bash
+# Long-running test (modify stress_tests.py)
+python3 stress_tests.py  # Choose option 3 for endurance
+```
+
 #### 4. Streaming Performance
+
+##### Windows (PowerShell)
 ```powershell
 # Test chat streaming under load
 .\run_tests.ps1 -TestType streaming
+```
+
+##### Linux/macOS (Bash)
+```bash
+# Test chat streaming under load
+./run_tests.sh --test-type streaming
 ```
 
 ## Test Scenarios
