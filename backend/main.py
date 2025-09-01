@@ -19,6 +19,9 @@ import logging
 import json
 import uvicorn
 
+# Import Queue Manager
+from queue_manager import queue_manager
+
 # Load environment variables
 load_dotenv()
 
@@ -219,6 +222,126 @@ except Exception as e:
     raise
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize queue manager on startup"""
+    try:
+        await queue_manager.start_queues()
+        logger.info("Queue manager started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start queue manager: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown queue manager on shutdown"""
+    try:
+        queue_manager.stop_queues()
+        logger.info("Queue manager stopped successfully")
+    except Exception as e:
+        logger.error(f"Error stopping queue manager: {e}")
+
+
+async def search_relevant_documents(message: str, categories: Optional[List[str]] = None, threshold: float = 0.5):
+    """Search for relevant documents and return context chunks and metadata"""
+    # Build where clause for filtering
+    where_clause = {}
+    if categories:
+        if len(categories) == 1:
+            where_clause["category"] = categories[0]
+        else:
+            where_clause["category"] = {"$in": categories}
+
+    search_results = chunks_collection.query(
+        query_texts=[message],
+        n_results=10,  # Get more results to filter by relevance
+        where=where_clause if where_clause else None,
+    )
+
+    # Filter results by relevance score (distance threshold)
+    # Lower distance = higher similarity
+    relevance_threshold = float(
+        os.getenv("RELEVANCE_THRESHOLD", str(threshold)))
+
+    context_chunks = []
+    context_metadata = []
+
+    if search_results["documents"] and search_results["distances"]:
+        logger.info(
+            f"Found {len(search_results['documents'][0])} potential chunks for query: '{message}' (threshold: {relevance_threshold})")
+
+        for i, (doc, metadata, distance) in enumerate(zip(
+            search_results["documents"][0],
+            search_results["metadatas"][0],
+            search_results["distances"][0]
+        )):
+            logger.debug(
+                f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
+
+            # Only include chunks that are sufficiently relevant
+            if distance <= relevance_threshold:
+                context_chunks.append(doc)
+                context_metadata.append(metadata)
+                logger.debug(
+                    f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+            else:
+                logger.debug(
+                    f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+
+            # Limit to top 5 relevant results
+            if len(context_chunks) >= 5:
+                break
+
+        logger.info(
+            f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+    else:
+        logger.warning(
+            f"No search results found for query: '{message}'")
+
+    # Prepare context information for frontend with actual relevance scores
+    context_info = []
+    search_distances = search_results.get("distances", [[]])[
+        0] if search_results.get("distances") else []
+
+    for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
+        # Calculate relevance score (1 - distance) for display
+        relevance_score = 1.0 - \
+            search_distances[i] if i < len(search_distances) else 1.0
+
+        context_info.append(
+            {
+                "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
+                "filename": metadata.get("filename", "Unknown"),
+                "category": metadata.get("category", "Unknown"),
+                "doc_id": metadata.get("doc_id", ""),
+                "relevance_score": round(relevance_score, 3),
+            }
+        )
+
+    return context_chunks, context_info
+
+
+def get_user_identifier(request: Request) -> str:
+    """Get a unique identifier for the user from the request"""
+    # Try to get from various sources
+    # 1. Authorization header (if authenticated)
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        # In a real implementation, you'd decode the JWT
+        # For now, use the token as identifier
+        return f"auth_{auth_header[7:][:16]}"
+
+    # 2. Session cookie or similar
+    session_id = request.cookies.get("session_id")
+    if session_id:
+        return f"session_{session_id}"
+
+    # 3. IP address + User-Agent for anonymous users
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("User-Agent", "unknown")[:50]
+    return f"anon_{client_ip}_{hash(user_agent) % 10000}"
+
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -294,6 +417,21 @@ async def health_check():
             }
         except Exception as e:
             health_status["services"]["embeddings"] = {
+                "status": "unhealthy",
+                "error": str(e),
+            }
+
+        # Check queue manager
+        try:
+            queue_stats = queue_manager.get_queue_stats()
+            health_status["services"]["queue_manager"] = {
+                "status": "healthy",
+                "total_queues": queue_stats["total_queues"],
+                "is_running": queue_stats["is_running"],
+                "active_conversations": sum(q["active_conversations"] for q in queue_stats["queues"]),
+            }
+        except Exception as e:
+            health_status["services"]["queue_manager"] = {
                 "status": "unhealthy",
                 "error": str(e),
             }
@@ -499,67 +637,21 @@ async def search_documents(
 
 
 @app.post("/api/chat")
-async def chat_with_documents(chat_request: ChatRequest):
-    """Chat interface with document context using Qwen3 - No authentication required"""
+async def chat_with_documents(chat_request: ChatRequest, request: Request):
+    """Chat interface with document context using Qwen3 via queue system - No authentication required"""
     try:
-        # Import Ollama client
-        from ollama_client import ollama_client
+        # Get user identifier for queue routing
+        user_identifier = get_user_identifier(request)
+        logger.info(f"Processing chat request for user: {user_identifier}")
 
-        # First, search for relevant documents
-        where_clause = {}
-        if chat_request.categories:
-            if len(chat_request.categories) == 1:
-                where_clause["category"] = chat_request.categories[0]
-            else:
-                where_clause["category"] = {"$in": chat_request.categories}
-
-        search_results = chunks_collection.query(
-            query_texts=[chat_request.message],
-            n_results=10,  # Get more results to filter by relevance
-            where=where_clause if where_clause else None,
+        # Search for relevant documents
+        context_chunks, context_info = await search_relevant_documents(
+            chat_request.message,
+            chat_request.categories,
+            threshold=0.5
         )
 
-        # Filter results by relevance score (distance threshold)
-        # Lower distance = higher similarity
-        relevance_threshold = float(
-            os.getenv("RELEVANCE_THRESHOLD", "0.5"))  # Configurable threshold
-
-        context_chunks = []
-        context_metadata = []
-
-        if search_results["documents"] and search_results["distances"]:
-            logger.info(
-                f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-
-            for i, (doc, metadata, distance) in enumerate(zip(
-                search_results["documents"][0],
-                search_results["metadatas"][0],
-                search_results["distances"][0]
-            )):
-                logger.debug(
-                    f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-
-                # Only include chunks that are sufficiently relevant
-                if distance <= relevance_threshold:
-                    context_chunks.append(doc)
-                    context_metadata.append(metadata)
-                    logger.debug(
-                        f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
-                else:
-                    logger.debug(
-                        f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-
-                # Limit to top 5 relevant results
-                if len(context_chunks) >= 5:
-                    break
-
-            logger.info(
-                f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
-        else:
-            logger.warning(
-                f"No search results found for query: '{chat_request.message}'")
-
-        # Prepare system prompt for Qwen3 with conversation history
+        # Prepare system prompt for Qwen3
         base_system_prompt = (
             f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
             f"You help students, faculty, and staff find information from official documents. "
@@ -570,62 +662,44 @@ async def chat_with_documents(chat_request: ChatRequest):
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
         )
 
-        # Add conversation history to the system prompt if available
-        system_prompt = base_system_prompt
-        if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
-            logger.info(
-                f"Including conversation history: {len(chat_request.conversation_history)} messages")
-            history_text = "\n\nPrevious conversation:\n"
-            # Last 10 messages to avoid token limit
-            for msg in chat_request.conversation_history[-10:]:
-                role = "Human" if msg.type == "user" else "Assistant"
-                history_text += f"{role}: {msg.content}\n"
-            system_prompt = base_system_prompt + history_text + \
-                "\nPlease maintain context from this conversation when answering the current question."
-        else:
-            logger.info("No conversation history provided")
+        # Prepare request data for queue processing
+        request_data = {
+            "user_identifier": user_identifier,
+            "message": chat_request.message,
+            "categories": chat_request.categories,
+            "conversation_history": chat_request.conversation_history,
+            "system_prompt": base_system_prompt,
+            "context_chunks": context_chunks,
+        }
 
-        # Generate response using Qwen3 via Ollama
-        if context_chunks:
-            response = await ollama_client.generate_response(
-                prompt=chat_request.message,
-                context=context_chunks,
-                system_prompt=system_prompt,
-            )
-        else:
-            response = await ollama_client.generate_response(
-                prompt=chat_request.message,
-                system_prompt=system_prompt
-                + " Note: No relevant documents were found for this query.",
+        # Process through queue manager
+        result = await queue_manager.process_chat_request(request_data)
+
+        if "error" in result:
+            # Fallback response
+            fallback_response = (
+                "I apologize, but I'm having trouble processing your request right now. "
+                "This might be because the Qwen model is not available or there's a connection issue. "
+                "Please try again later or contact support if the problem persists."
             )
 
-        # Prepare context information for frontend with actual relevance scores
-        context_info = []
-        search_distances = search_results.get("distances", [[]])[
-            0] if search_results.get("distances") else []
-
-        for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
-            # Calculate relevance score (1 - distance) for display
-            relevance_score = 1.0 - \
-                search_distances[i] if i < len(search_distances) else 1.0
-
-            context_info.append(
-                {
-                    "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
-                    "filename": metadata.get("filename", "Unknown"),
-                    "category": metadata.get("category", "Unknown"),
-                    "doc_id": metadata.get("doc_id", ""),
-                    "relevance_score": round(relevance_score, 3),
-                }
-            )
+            return {
+                "message": chat_request.message,
+                "response": fallback_response,
+                "context_chunks": context_info,
+                "context_found": len(context_chunks) > 0,
+                "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
+                "error": result["error"],
+            }
 
         return {
             "message": chat_request.message,
-            "response": response,
+            "response": result["response"],
             "context_chunks": context_info,
             "context_found": len(context_chunks) > 0,
-            "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
-            "model_used": ollama_client.chat_model,
+            "conversation_id": result["conversation_id"],
+            "queue_id": result["queue_id"],
+            "model_used": result["model_used"],
         }
 
     except Exception as e:
@@ -649,100 +723,33 @@ async def chat_with_documents(chat_request: ChatRequest):
 
 
 @app.post("/api/chat/stream")
-async def chat_with_documents_stream(chat_request: ChatRequest):
-    """Streaming chat interface with document context using Qwen - No authentication required"""
+async def chat_with_documents_stream(chat_request: ChatRequest, request: Request):
+    """Streaming chat interface with document context using Qwen via queue system - No authentication required"""
 
     async def generate_response():
         try:
-            # Import Ollama client
-            from ollama_client import ollama_client
+            # Get user identifier for queue routing
+            user_identifier = get_user_identifier(request)
+            logger.info(f"Processing streaming chat request for user: {user_identifier}")
 
-            # First, search for relevant documents
-            where_clause = {}
-            if chat_request.categories:
-                if len(chat_request.categories) == 1:
-                    where_clause["category"] = chat_request.categories[0]
-                else:
-                    where_clause["category"] = {"$in": chat_request.categories}
-
-            search_results = chunks_collection.query(
-                query_texts=[chat_request.message],
-                n_results=10,  # Get more results to filter by relevance
-                where=where_clause if where_clause else None,
+            # Search for relevant documents
+            context_chunks, context_info = await search_relevant_documents(
+                chat_request.message,
+                chat_request.categories,
+                threshold=0.7  # Slightly higher threshold for streaming
             )
 
-            # Filter results by relevance score (distance threshold)
-            # Lower distance = higher similarity
-            relevance_threshold = float(
-                # Configurable threshold
-                os.getenv("RELEVANCE_THRESHOLD", "0.7"))
-
-            context_chunks = []
-            context_metadata = []
-
-            if search_results["documents"] and search_results["distances"]:
-                logger.info(
-                    f"Found {len(search_results['documents'][0])} potential chunks for query: '{chat_request.message}' (threshold: {relevance_threshold})")
-
-                for i, (doc, metadata, distance) in enumerate(zip(
-                    search_results["documents"][0],
-                    search_results["metadatas"][0],
-                    search_results["distances"][0]
-                )):
-                    logger.debug(
-                        f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-
-                    # Only include chunks that are sufficiently relevant
-                    if distance <= relevance_threshold:
-                        context_chunks.append(doc)
-                        context_metadata.append(metadata)
-                        logger.debug(
-                            f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
-                    else:
-                        logger.debug(
-                            f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
-
-                    # Limit to top 5 relevant results
-                    if len(context_chunks) >= 5:
-                        break
-
-                logger.info(
-                    f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
-            else:
-                logger.warning(
-                    f"No search results found for query: '{chat_request.message}'")
-
-            # Send context information first with actual relevance scores
-            context_info = []
-            search_distances = search_results.get("distances", [[]])[
-                0] if search_results.get("distances") else []
-
-            for i, (chunk, metadata) in enumerate(zip(context_chunks, context_metadata)):
-                # Calculate relevance score (1 - distance) for display
-                relevance_score = 1.0 - \
-                    search_distances[i] if i < len(search_distances) else 1.0
-
-                context_info.append(
-                    {
-                        "text": chunk[:200] + "..." if len(chunk) > 200 else chunk,
-                        "filename": metadata.get("filename", "Unknown"),
-                        "category": metadata.get("category", "Unknown"),
-                        "doc_id": metadata.get("doc_id", ""),
-                        "relevance_score": round(relevance_score, 3),
-                    }
-                )
-
-            # Send metadata first
+            # Send context information first
             metadata_response = {
                 "type": "metadata",
                 "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
                 "context_chunks": context_info,
                 "context_found": len(context_chunks) > 0,
-                "model_used": ollama_client.chat_model,
+                "model_used": "qwen3:0.6b",  # Will be updated from queue result
             }
             yield f"data: {json.dumps(metadata_response)}\n\n"
 
-            # Generate and stream response with character-level streaming including conversation history
+            # Prepare system prompt for Qwen3
             base_system_prompt = (
                 f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
                 f"You help students, faculty, and staff find information from official documents. "
@@ -752,37 +759,18 @@ async def chat_with_documents_stream(chat_request: ChatRequest):
                 f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
             )
 
-            # Add conversation history to the system prompt if available
-            system_prompt = base_system_prompt
-            if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
-                logger.info(
-                    f"Including conversation history: {len(chat_request.conversation_history)} messages")
-                history_text = "\n\nPrevious conversation:\n"
-                # Last 10 messages to avoid token limit
-                for msg in chat_request.conversation_history[-10:]:
-                    role = "Human" if msg.type == "user" else "Assistant"
-                    history_text += f"{role}: {msg.content}\n"
-                system_prompt = base_system_prompt + history_text + \
-                    "\nPlease maintain context from this conversation when answering the current question."
-            else:
-                logger.info("No conversation history provided")
+            # Prepare request data for queue processing
+            request_data = {
+                "user_identifier": user_identifier,
+                "message": chat_request.message,
+                "categories": chat_request.categories,
+                "conversation_history": chat_request.conversation_history,
+                "system_prompt": base_system_prompt,
+                "context_chunks": context_chunks,
+            }
 
-            # Stream response from Ollama with immediate character output
-            if context_chunks:
-                response_stream = ollama_client.generate_response_stream(
-                    prompt=chat_request.message,
-                    context=context_chunks,
-                    system_prompt=system_prompt,
-                )
-            else:
-                response_stream = ollama_client.generate_response_stream(
-                    prompt=chat_request.message,
-                    system_prompt=system_prompt
-                    + " Note: No relevant documents were found for this query.",
-                )
-
-            # Stream the response chunks immediately
-            async for chunk in response_stream:
+            # Process through queue manager with streaming
+            async for chunk in queue_manager.process_stream_request(request_data):
                 if chunk:
                     chunk_response = {
                         "type": "content",
@@ -937,6 +925,16 @@ async def get_categories(current_user: UserInfo = Depends(get_current_user)):
             {"value": "mess", "label": "Messes"},
         ]
     }
+
+
+@app.get("/api/queue/stats")
+async def get_queue_stats():
+    """Get queue manager statistics"""
+    try:
+        return queue_manager.get_queue_stats()
+    except Exception as e:
+        logger.error(f"Error getting queue stats: {e}")
+        return {"error": str(e)}
 
 
 @app.get("/api/stats")
