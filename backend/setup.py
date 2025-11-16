@@ -20,32 +20,31 @@ setup_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def check_ollama_installation():
-    """Check if Ollama is installed and running"""
+async def check_hf_tgi_server():
+    """Check if HF TGI server is running"""
     try:
-        result = subprocess.run(["ollama", "version"],
-                                capture_output=True, text=True)
-        if result.returncode == 0:
-            logger.info(f"Ollama is installed: {result.stdout.strip()}")
-            return True
-        else:
-            logger.error("Ollama is installed but not responding correctly")
-            return False
-    except FileNotFoundError:
-        logger.error("Ollama is not installed or not in PATH")
+        from ollama_client import ollama_client
+        return await ollama_client.check_connection()
+    except Exception as e:
+        logger.error(f"Failed to check HF TGI: {e}")
         return False
 
 
-async def setup_ollama_models():
-    """Setup required Ollama models"""
-    logger.info("Setting up Ollama models...")
+async def setup_inference_model():
+    """Setup HF TGI inference model"""
+    logger.info("Setting up HF TGI inference model...")
 
-    # Check if Ollama is running
-    if not await check_ollama_installation():
-        logger.error("Please install Ollama first: https://ollama.ai/download")
+    # Check if HF TGI is running
+    if not await check_hf_tgi_server():
+        logger.error("Please start HF TGI Docker container first:")
+        logger.error("docker run --gpus all \\")
+        logger.error("    -v ~/.cache/huggingface:/root/.cache/huggingface \\")
+        logger.error("    -p 8000:80 \\")
+        logger.error("    ghcr.io/huggingface/text-generation-inference:latest \\")
+        logger.error("    --model-id Qwen/Qwen3-1.7B")
         return False
 
-    # Import Ollama client
+    # Import client
     try:
         from ollama_client import ollama_client
     except ImportError:
@@ -54,22 +53,15 @@ async def setup_ollama_models():
         )
         return False
 
-    # Check connection
-    if not await ollama_client.check_connection():
-        logger.error(
-            "Cannot connect to Ollama server. Make sure Ollama is running: ollama serve"
-        )
-        return False
-
     # Setup chat model
     chat_model = ollama_client.chat_model
-    logger.info(f"Ensuring chat model is available: {chat_model}")
+    logger.info(f"Using HF TGI chat model: {chat_model}")
 
     if not await ollama_client.ensure_model_available(chat_model):
-        logger.error(f"Failed to setup chat model: {chat_model}")
+        logger.error(f"Failed to verify chat model: {chat_model}")
         return False
 
-    logger.info("✓ Ollama models setup complete!")
+    logger.info("✓ HF TGI inference model ready!")
     return True
 
 
@@ -216,13 +208,10 @@ async def main():
         logger.error("Setup failed at embedding model test")
         return False
 
-    # Step 4: Setup Ollama models
-    logger.info("\n4. Setting up Ollama models...")
-    if not await setup_ollama_models():
-        logger.warning("Ollama setup failed - chat functionality may not work")
-        logger.warning(
-            "To fix: Install Ollama and run 'ollama serve', then 'ollama pull qwen3:0.6B'"
-        )
+    # Step 4: Setup inference model
+    logger.info("\n4. Setting up HF TGI inference model...")
+    if not await setup_inference_model():
+        logger.warning("HF TGI setup failed - chat functionality may not work")
 
     # Step 5: Run comprehensive test
     logger.info("\n5. Running comprehensive test...")

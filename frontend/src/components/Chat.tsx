@@ -176,6 +176,11 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
             if (!conversationId && data.conversation_id) {
               setConversationId(data.conversation_id);
             }
+          } else if (data.type === "metadata_update") {
+            // Update metadata with filtered references
+            if (metadata && data.context_chunks) {
+              metadata.context_chunks = data.context_chunks;
+            }
           } else if (data.type === "content") {
             accumulatedContent += data.content;
             setMessages((prev) =>
@@ -267,10 +272,10 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
 
               <div
                 className={`max-w-[80%] rounded-2xl px-4 md:px-6 py-3 md:py-4 text-sm md:text-base shadow-md break-words ${message.type === "user"
-                    ? "bg-[#60a5fa] text-[#181A20]"
-                    : message.isError
-                      ? "bg-red-500 text-white"
-                      : "bg-[#93c5fd] text-[#232946]"
+                  ? "bg-[#60a5fa] text-[#181A20]"
+                  : message.isError
+                    ? "bg-red-500 text-white"
+                    : "bg-[#93c5fd] text-[#232946]"
                   }`}
               >
                 {message.type === "bot" ? (
@@ -331,8 +336,8 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
             <button
               type="submit"
               className={`px-6 md:px-7 rounded-xl bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold text-lg border-none cursor-pointer shadow-md transition-transform duration-200 flex items-center justify-center ${!inputValue.trim() || isLoading
-                  ? "scale-100 cursor-not-allowed"
-                  : "scale-105"
+                ? "scale-100 cursor-not-allowed"
+                : "scale-105"
                 }`}
               disabled={!inputValue.trim() || isLoading}
             >
@@ -358,8 +363,8 @@ const Chat: React.FC<ChatProps> = ({ chatStarted, setChatStarted }) => {
                     });
                   }}
                   className={`flex items-center gap-2 rounded-lg px-3 md:px-4 py-2 font-medium text-sm md:text-base border-none cursor-pointer transition-all duration-200 ${isSelected
-                      ? "bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md"
-                      : "bg-[#181A20] text-[#93c5fd]"
+                    ? "bg-gradient-to-r from-[#60a5fa] to-[#93c5fd] text-[#181A20] font-bold shadow-md"
+                    : "bg-[#181A20] text-[#93c5fd]"
                     }`}
                 >
                   <IconComp

@@ -19,9 +19,6 @@ import logging
 import json
 import uvicorn
 
-# Import Queue Manager
-from queue_manager import queue_manager
-
 # Load environment variables
 load_dotenv()
 
@@ -37,10 +34,21 @@ app = FastAPI(
 )
 
 # CORS middleware
+cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+if not cors_origins or cors_origins == [""]:
+    # Default origins if not specified
+    cors_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://10.2.58.213:3000",
+    ]
+# Allow all origins in development mode
+if os.getenv("DEBUG", "True").lower() == "true":
+    cors_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000",
-                   "https://your-frontend-domain.com"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -191,10 +199,48 @@ async def get_admin_user(
 
 # Custom embedding function for ChromaDB
 try:
+    # Check environment variables for device selection
+    force_cpu_env = os.getenv("EMBEDDING_FORCE_CPU", "0").lower() in {"1", "true", "yes"}
+    embedding_device_env = os.getenv("EMBEDDING_DEVICE", "auto").lower()
+    
+    # Determine device based on environment variables and availability
+    if force_cpu_env:
+        device = "cpu"
+        logger.info("Forcing CPU usage for embeddings (EMBEDDING_FORCE_CPU=1)")
+    elif embedding_device_env == "cpu":
+        device = "cpu"
+        logger.info("Using CPU for embeddings (EMBEDDING_DEVICE=cpu)")
+    elif embedding_device_env == "cuda" and torch.cuda.is_available():
+        device = "cuda"
+        logger.info("Using CUDA for embeddings (EMBEDDING_DEVICE=cuda)")
+    elif embedding_device_env == "mps" and torch.backends.mps.is_available():
+        device = "mps"
+        logger.info("Using MPS for embeddings (EMBEDDING_DEVICE=mps)")
+    elif embedding_device_env == "auto":
+        # Auto-selection logic
+        if torch.backends.mps.is_available():
+            device = "mps"
+            logger.info("Auto-selected MPS for embeddings")
+        elif torch.cuda.is_available():
+            # Check GPU memory for safety
+            gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            if gpu_memory_gb >= 8:  # Require at least 8GB GPU memory
+                device = "cuda"
+                logger.info(f"Auto-selected CUDA for embeddings ({gpu_memory_gb:.1f}GB GPU)")
+            else:
+                device = "cpu"
+                logger.warning(f"GPU memory too low ({gpu_memory_gb:.1f}GB), auto-falling back to CPU")
+        else:
+            device = "cpu"
+            logger.info("Auto-selected CPU for embeddings (no GPU available)")
+    else:
+        # Fallback to original logic
+        device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Using fallback device selection: {device}")
+
     embedding_function = SentenceTransformerEmbeddingFunction(
         model_name="Qwen/Qwen3-Embedding-0.6B",
-        device="mps" if torch.backends.mps.is_available(
-        ) else "cuda" if torch.cuda.is_available() else "cpu",
+        device=device,
         normalize_embeddings=True
     )
     logger.info("Custom embedding function initialized successfully")
@@ -222,24 +268,7 @@ except Exception as e:
     raise
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize queue manager on startup"""
-    try:
-        await queue_manager.start_queues()
-        logger.info("Queue manager started successfully")
-    except Exception as e:
-        logger.error(f"Failed to start queue manager: {e}")
 
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Shutdown queue manager on shutdown"""
-    try:
-        queue_manager.stop_queues()
-        logger.info("Queue manager stopped successfully")
-    except Exception as e:
-        logger.error(f"Error stopping queue manager: {e}")
 
 
 async def search_relevant_documents(message: str, categories: Optional[List[str]] = None, threshold: float = 0.5):
@@ -269,31 +298,43 @@ async def search_relevant_documents(message: str, categories: Optional[List[str]
     if search_results["documents"] and search_results["distances"]:
         logger.info(
             f"Found {len(search_results['documents'][0])} potential chunks for query: '{message}' (threshold: {relevance_threshold})")
+        
+        logger.info("=" * 80)
+        logger.info("ALL RETRIEVED CHUNKS:")
+        logger.info("=" * 80)
 
         for i, (doc, metadata, distance) in enumerate(zip(
             search_results["documents"][0],
             search_results["metadatas"][0],
             search_results["distances"][0]
         )):
-            logger.debug(
-                f"Chunk {i}: distance={distance:.3f}, filename={metadata.get('filename', 'Unknown')}")
-
+            relevance_score = 1.0 - distance
+            logger.info(f"\n--- Chunk {i+1} ---")
+            logger.info(f"Distance: {distance:.4f} | Relevance Score: {relevance_score:.4f}")
+            logger.info(f"Filename: {metadata.get('filename', 'Unknown')}")
+            logger.info(f"Category: {metadata.get('category', 'Unknown')}")
+            logger.info(f"Doc ID: {metadata.get('doc_id', 'Unknown')}")
+            logger.info(f"Chunk Position: {metadata.get('position', 'Unknown')}")
+            logger.info(f"Text Preview: {doc[:300]}..." if len(doc) > 300 else f"Text: {doc}")
+            logger.info(f"Full Text Length: {len(doc)} characters")
+            
             # Only include chunks that are sufficiently relevant
             if distance <= relevance_threshold:
                 context_chunks.append(doc)
                 context_metadata.append(metadata)
-                logger.debug(
-                    f"Including chunk {i} (distance={distance:.3f}) from {metadata.get('filename')}")
+                logger.info(f"✓ INCLUDED (distance={distance:.3f} <= threshold={relevance_threshold})")
             else:
-                logger.debug(
-                    f"Excluding chunk {i} (distance={distance:.3f}) - not relevant enough")
+                logger.info(f"✗ EXCLUDED (distance={distance:.3f} > threshold={relevance_threshold})")
 
             # Limit to top 5 relevant results
             if len(context_chunks) >= 5:
+                logger.info(f"\n⚠️ Reached limit of 5 chunks, stopping further inclusion")
                 break
 
+        logger.info("=" * 80)
         logger.info(
-            f"Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+            f"SUMMARY: Selected {len(context_chunks)} relevant chunks out of {len(search_results['documents'][0])} potential matches")
+        logger.info("=" * 80)
     else:
         logger.warning(
             f"No search results found for query: '{message}'")
@@ -319,27 +360,6 @@ async def search_relevant_documents(message: str, categories: Optional[List[str]
         )
 
     return context_chunks, context_info
-
-
-def get_user_identifier(request: Request) -> str:
-    """Get a unique identifier for the user from the request"""
-    # Try to get from various sources
-    # 1. Authorization header (if authenticated)
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        # In a real implementation, you'd decode the JWT
-        # For now, use the token as identifier
-        return f"auth_{auth_header[7:][:16]}"
-
-    # 2. Session cookie or similar
-    session_id = request.cookies.get("session_id")
-    if session_id:
-        return f"session_{session_id}"
-
-    # 3. IP address + User-Agent for anonymous users
-    client_ip = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("User-Agent", "unknown")[:50]
-    return f"anon_{client_ip}_{hash(user_agent) % 10000}"
 
 
 @app.get("/")
@@ -380,23 +400,23 @@ async def health_check():
                 "error": str(e),
             }
 
-        # Check Ollama connection
+        # Check HF TGI connection
         try:
-            ollama_available = await ollama_client.check_connection()
-            if ollama_available:
+            hf_tgi_available = await ollama_client.check_connection()
+            if hf_tgi_available:
                 models = await ollama_client.list_models()
-                health_status["services"]["ollama"] = {
+                health_status["services"]["hf_tgi"] = {
                     "status": "healthy",
-                    "available_models": [model["name"] for model in models],
+                    "available_models": [model.get("id", model.get("name", "unknown")) for model in models],
                     "chat_model": ollama_client.chat_model,
                 }
             else:
-                health_status["services"]["ollama"] = {
+                health_status["services"]["hf_tgi"] = {
                     "status": "unhealthy",
-                    "error": "Cannot connect to Ollama server",
+                    "error": "Cannot connect to HF TGI server",
                 }
         except Exception as e:
-            health_status["services"]["ollama"] = {
+            health_status["services"]["hf_tgi"] = {
                 "status": "unhealthy",
                 "error": str(e),
             }
@@ -417,21 +437,6 @@ async def health_check():
             }
         except Exception as e:
             health_status["services"]["embeddings"] = {
-                "status": "unhealthy",
-                "error": str(e),
-            }
-
-        # Check queue manager
-        try:
-            queue_stats = queue_manager.get_queue_stats()
-            health_status["services"]["queue_manager"] = {
-                "status": "healthy",
-                "total_queues": queue_stats["total_queues"],
-                "is_running": queue_stats["is_running"],
-                "active_conversations": sum(q["active_conversations"] for q in queue_stats["queues"]),
-            }
-        except Exception as e:
-            health_status["services"]["queue_manager"] = {
                 "status": "unhealthy",
                 "error": str(e),
             }
@@ -638,11 +643,11 @@ async def search_documents(
 
 @app.post("/api/chat")
 async def chat_with_documents(chat_request: ChatRequest, request: Request):
-    """Chat interface with document context using Qwen3 via queue system - No authentication required"""
+    """Chat interface with document context using Qwen3 - No authentication required"""
     try:
-        # Get user identifier for queue routing
-        user_identifier = get_user_identifier(request)
-        logger.info(f"Processing chat request for user: {user_identifier}")
+        from ollama_client import ollama_client
+
+        logger.info(f"Processing chat request")
 
         # Search for relevant documents
         context_chunks, context_info = await search_relevant_documents(
@@ -650,6 +655,9 @@ async def chat_with_documents(chat_request: ChatRequest, request: Request):
             chat_request.categories,
             threshold=0.5
         )
+        
+        # Extract context metadata for tracking
+        context_metadata = context_info
 
         # Prepare system prompt for Qwen3
         base_system_prompt = (
@@ -658,48 +666,51 @@ async def chat_with_documents(chat_request: ChatRequest, request: Request):
             f"Use the provided context to answer questions accurately. "
             f"If you cannot find relevant information in the context, say so politely. "
             f"DO NOT answer questions that are not related to IIIT Hyderabad or if the information is not available in provided context. "
+            f"When answering, naturally mention the document names you are referencing (e.g., 'According to [document name]...'). "
             f"Always be helpful, concise, and reference the source documents when applicable. "
             f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
         )
 
-        # Prepare request data for queue processing
-        request_data = {
-            "user_identifier": user_identifier,
-            "message": chat_request.message,
-            "categories": chat_request.categories,
-            "conversation_history": chat_request.conversation_history,
-            "system_prompt": base_system_prompt,
-            "context_chunks": context_chunks,
-        }
+        # Build conversation context from client-provided history
+        conversation_context = ""
+        if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
+            conversation_context = "\n\nPrevious conversation:\n"
+            # Use last 10 messages for context
+            for msg in chat_request.conversation_history[-10:]:
+                role = "Human" if msg.type == "user" else "Assistant"
+                conversation_context += f"{role}: {msg.content}\n"
+            conversation_context += "Please maintain context from this conversation."
 
-        # Process through queue manager
-        result = await queue_manager.process_chat_request(request_data)
+        # Build full system prompt with conversation history
+        full_system_prompt = base_system_prompt + conversation_context
 
-        if "error" in result:
-            # Fallback response
-            fallback_response = (
-                "I apologize, but I'm having trouble processing your request right now. "
-                "This might be because the Qwen model is not available or there's a connection issue. "
-                "Please try again later or contact support if the problem persists."
-            )
+        # Generate response
+        response = await ollama_client.generate_response(
+            prompt=chat_request.message,
+            context=context_chunks,
+            system_prompt=full_system_prompt,
+            context_metadata=context_metadata
+        )
 
-            return {
-                "message": chat_request.message,
-                "response": fallback_response,
-                "context_chunks": context_info,
-                "context_found": len(context_chunks) > 0,
-                "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
-                "error": result["error"],
-            }
+        # Extract which files were actually referenced in the response
+        available_files = [meta.get('filename', 'Unknown') for meta in context_metadata]
+        referenced_files = ollama_client.extract_referenced_files(response, available_files)
+        
+        # Filter context_info to only include referenced files
+        filtered_context_info = [
+            info for info in context_info 
+            if info.get('filename') in referenced_files
+        ]
+        
+        logger.info(f"Original context: {len(context_info)} files, Referenced: {len(filtered_context_info)} files")
 
         return {
             "message": chat_request.message,
-            "response": result["response"],
-            "context_chunks": context_info,
+            "response": response,
+            "context_chunks": filtered_context_info,
             "context_found": len(context_chunks) > 0,
-            "conversation_id": result["conversation_id"],
-            "queue_id": result["queue_id"],
-            "model_used": result["model_used"],
+            "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
+            "model_used": ollama_client.chat_model,
         }
 
     except Exception as e:
@@ -724,13 +735,13 @@ async def chat_with_documents(chat_request: ChatRequest, request: Request):
 
 @app.post("/api/chat/stream")
 async def chat_with_documents_stream(chat_request: ChatRequest, request: Request):
-    """Streaming chat interface with document context using Qwen via queue system - No authentication required"""
+    """Streaming chat interface with document context using Qwen - No authentication required"""
 
     async def generate_response():
         try:
-            # Get user identifier for queue routing
-            user_identifier = get_user_identifier(request)
-            logger.info(f"Processing streaming chat request for user: {user_identifier}")
+            from ollama_client import ollama_client
+
+            logger.info(f"Processing streaming chat request")
 
             # Search for relevant documents
             context_chunks, context_info = await search_relevant_documents(
@@ -738,14 +749,17 @@ async def chat_with_documents_stream(chat_request: ChatRequest, request: Request
                 chat_request.categories,
                 threshold=0.7  # Slightly higher threshold for streaming
             )
+            
+            # Extract context metadata for tracking
+            context_metadata = context_info
 
-            # Send context information first
+            # Send initial metadata (will be updated later with filtered references)
             metadata_response = {
                 "type": "metadata",
                 "conversation_id": chat_request.conversation_id or str(uuid.uuid4()),
                 "context_chunks": context_info,
                 "context_found": len(context_chunks) > 0,
-                "model_used": "qwen3:0.6b",  # Will be updated from queue result
+                "model_used": ollama_client.chat_model,
             }
             yield f"data: {json.dumps(metadata_response)}\n\n"
 
@@ -753,31 +767,63 @@ async def chat_with_documents_stream(chat_request: ChatRequest, request: Request
             base_system_prompt = (
                 f"You are Jagruti, a helpful assistant for IIIT Hyderabad. "
                 f"You help students, faculty, and staff find information from official documents. "
-                f"Use the provided context to answer questions accurately. "
+                f"Use the provided context (if it is useful) to answer questions accurately.  Don't mention the word context though. "
                 f"If you cannot find relevant information in the context, say so politely. "
+                f"When answering, naturally mention the document names you are referencing (e.g., 'According to [document name]...'). "
                 f"Always be helpful, concise, and reference the source documents when applicable. "
-                f"Today's date is {datetime.now().strftime('%Y-%m-%d')}."
+                f"Today's datetime is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
             )
 
-            # Prepare request data for queue processing
-            request_data = {
-                "user_identifier": user_identifier,
-                "message": chat_request.message,
-                "categories": chat_request.categories,
-                "conversation_history": chat_request.conversation_history,
-                "system_prompt": base_system_prompt,
-                "context_chunks": context_chunks,
-            }
+            # Build conversation context from client-provided history
+            conversation_context = ""
+            if chat_request.conversation_history and len(chat_request.conversation_history) > 0:
+                conversation_context = "\n\nPrevious conversation:\n"
+                # Use last 10 messages for context
+                for msg in chat_request.conversation_history[-10:]:
+                    role = "Human" if msg.type == "user" else "Assistant"
+                    conversation_context += f"{role}: {msg.content}\n"
+                conversation_context += "Please maintain context from this conversation."
 
-            # Process through queue manager with streaming
-            async for chunk in queue_manager.process_stream_request(request_data):
+            # Build full system prompt with conversation history
+            full_system_prompt = base_system_prompt + conversation_context
+
+            # Collect the full response to determine referenced files
+            full_response = ""
+            
+            # Generate streaming response
+            async for chunk in ollama_client.generate_response_stream(
+                prompt=chat_request.message,
+                context=context_chunks,
+                system_prompt=full_system_prompt,
+                context_metadata=context_metadata
+            ):
                 if chunk:
+                    full_response += chunk
                     chunk_response = {
                         "type": "content",
                         "content": chunk,
                         "is_final": False
                     }
                     yield f"data: {json.dumps(chunk_response)}\n\n"
+
+            # Extract which files were actually referenced in the response
+            available_files = [meta.get('filename', 'Unknown') for meta in context_metadata]
+            referenced_files = ollama_client.extract_referenced_files(full_response, available_files)
+            
+            # Filter context_info to only include referenced files
+            filtered_context_info = [
+                info for info in context_info 
+                if info.get('filename') in referenced_files
+            ]
+            
+            logger.info(f"Stream - Original context: {len(context_info)} files, Referenced: {len(filtered_context_info)} files")
+            
+            # Send updated metadata with filtered references
+            updated_metadata_response = {
+                "type": "metadata_update",
+                "context_chunks": filtered_context_info,
+            }
+            yield f"data: {json.dumps(updated_metadata_response)}\n\n"
 
             # Send final marker
             final_response = {
@@ -927,16 +973,6 @@ async def get_categories(current_user: UserInfo = Depends(get_current_user)):
     }
 
 
-@app.get("/api/queue/stats")
-async def get_queue_stats():
-    """Get queue manager statistics"""
-    try:
-        return queue_manager.get_queue_stats()
-    except Exception as e:
-        logger.error(f"Error getting queue stats: {e}")
-        return {"error": str(e)}
-
-
 @app.get("/api/stats")
 async def get_stats(current_user: UserInfo = Depends(get_current_user)):
     """Get system statistics"""
@@ -964,6 +1000,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host=os.getenv("HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", 8000)),
+        port=int(os.getenv("PORT", 8001)),
         reload=os.getenv("DEBUG", "True").lower() == "true",
     )

@@ -135,8 +135,8 @@ ChromaDB is metadata-driven. We maintain two main collections:
 
 We are using:
 
-- **Qwen 3 (8B)** via Ollama for summarising and chatbot tasks
-- **Qwen/Qwen3-Embedding-8B** via sentence-transformers for embeddings
+- **Qwen 3-0.6B** via Hugging Face Text Generation Inference for chat and summarization
+- **Qwen/Qwen3-Embedding-0.6B** via sentence-transformers for embeddings
 - **pdfplumber** for PDF text extraction (replacing PyPDF2)
 
 ## Technical Implementation
@@ -155,7 +155,7 @@ We are using:
 
 ### Chat & Summarization
 
-- **Ollama** with Qwen3:8b model for natural language tasks
+- **Hugging Face TGI** with Qwen 3-0.6B model for natural language tasks
 - Handles document summarization during upload
 - Provides contextual responses using retrieved document chunks
 
@@ -163,7 +163,7 @@ We are using:
 
 Copy `.env.example` to `.env` and configure:
 
-- Ollama server URL and model settings
+- HF TGI server URL and model settings
 - Embedding model preferences
 - ChromaDB storage location
 - File upload limits and allowed types

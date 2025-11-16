@@ -31,10 +31,8 @@ const Navbar = () => {
       }
     };
 
-    checkBackendStatus();
-
-    // Check status every 30 seconds
-    const interval = setInterval(checkBackendStatus, 30000);
+    // Check status every hour (no initial check)
+    const interval = setInterval(checkBackendStatus, 3600000);
 
     return () => clearInterval(interval);
   }, []);
@@ -59,41 +57,39 @@ const Navbar = () => {
                   />
                 </div>
               </div>
-                <Link
+              <Link
                 href="/"
                 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-[#93c5fd] to-[#60a5fa] bg-clip-text text-transparent mr-4"
                 onClick={(e) => {
                   e.preventDefault();
                   window.location.reload();
                 }}
-                >
+              >
                 Jagruti
-                </Link>
+              </Link>
 
               {/* Status indicator moved here */}
               <div
-                className={`hidden xs:flex items-center gap-2 text-xs ${
-                  backendStatus === "connected"
+                className={`hidden xs:flex items-center gap-2 text-xs ${backendStatus === "connected"
                     ? "text-green-400"
                     : backendStatus === "disconnected"
-                    ? "text-red-400"
-                    : "text-yellow-400"
-                }`}
+                      ? "text-red-400"
+                      : "text-yellow-400"
+                  }`}
               >
                 <div
-                  className={`w-2 h-2 rounded-full ${
-                    backendStatus === "connected"
+                  className={`w-2 h-2 rounded-full ${backendStatus === "connected"
                       ? "bg-green-400"
                       : backendStatus === "disconnected"
-                      ? "bg-red-400"
-                      : "bg-yellow-400"
-                  }`}
+                        ? "bg-red-400"
+                        : "bg-yellow-400"
+                    }`}
                 ></div>
                 {backendStatus === "connected"
                   ? "Connected"
                   : backendStatus === "disconnected"
-                  ? "Backend Offline"
-                  : "Checking..."}
+                    ? "Backend Offline"
+                    : "Checking..."}
               </div>
             </div>
           </div>

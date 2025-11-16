@@ -1,9 +1,10 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { ChevronDown } from 'lucide-react';
 
 interface MarkdownRendererProps {
   content: string;
@@ -11,8 +12,69 @@ interface MarkdownRendererProps {
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className = '' }) => {
+  const [isThinkExpanded, setIsThinkExpanded] = useState(false);
+
+  // Extract think tags and content
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+  const thinkContent = thinkMatch ? thinkMatch[1].trim() : '';
+  const mainContent = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+
   return (
     <div className={`markdown-content ${className}`}>
+      {/* Collapsible Think Section */}
+      {thinkContent && (
+        <div className="mb-4 border border-[#60a5fa]/30 rounded-lg bg-[#60a5fa]/5 overflow-hidden">
+          <button
+            onClick={() => setIsThinkExpanded(!isThinkExpanded)}
+            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#60a5fa]/10 transition-colors duration-200"
+          >
+            <ChevronDown
+              size={16}
+              className={`transform transition-transform duration-200 text-[#60a5fa] ${isThinkExpanded ? 'rotate-180' : ''
+                }`}
+            />
+            <span className="text-xs font-medium text-[#60a5fa]/70 uppercase tracking-wide">
+              Thinking Process
+            </span>
+          </button>
+          {isThinkExpanded && (
+            <div className="px-3 py-3 border-t border-[#60a5fa]/20 bg-[#60a5fa]/2">
+              <div className="text-xs text-[#232946]/60 leading-relaxed">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeHighlight]}
+                  components={{
+                    p: ({ children }) => (
+                      <p className="mb-2 last:mb-0">
+                        {children}
+                      </p>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc list-inside mb-2 last:mb-0 space-y-0.5">
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal list-inside mb-2 last:mb-0 space-y-0.5">
+                        {children}
+                      </ol>
+                    ),
+                    li: ({ children }) => (
+                      <li className="leading-tight">
+                        {children}
+                      </li>
+                    ),
+                  }}
+                >
+                  {thinkContent}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main Content */}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -137,7 +199,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
 
           // Links
           a: ({ href, children }) => (
-            <a 
+            <a
               href={href}
               target="_blank"
               rel="noopener noreferrer"
@@ -166,15 +228,15 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className 
 
           // Images
           img: ({ src, alt }) => (
-            <img 
-              src={src} 
+            <img
+              src={src}
               alt={alt}
               className="max-w-full h-auto rounded-lg mb-3 border border-[#232946]/20"
             />
           ),
         }}
       >
-        {content}
+        {mainContent}
       </ReactMarkdown>
     </div>
   );

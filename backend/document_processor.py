@@ -48,7 +48,12 @@ logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     def __init__(self, embedding_model_name: Optional[str] = None, max_workers: Optional[int] = None, memory_config: Optional[Dict] = None, force_cpu: bool = False):
-        """Initialize document processor with Qwen3 embedding model and aggressive memory optimizations"""
+        """Initialize document processor with Qwen3 embedding model and aggressive memory optimizations.
+
+        CPU/GPU selection can be controlled via:
+        - ``force_cpu`` argument
+        - ``EMBEDDING_FORCE_CPU=1`` environment variable
+        """
         
         # Setup memory optimization
         if memory_config is None:
@@ -57,7 +62,10 @@ class DocumentProcessor:
             self.memory_monitor = MemoryMonitor()
         
         self.memory_config = memory_config
-        self.force_cpu = force_cpu
+
+        # Allow overriding CPU usage via environment variable
+        force_cpu_env = os.getenv("EMBEDDING_FORCE_CPU", "0").lower() in {"1", "true", "yes"}
+        self.force_cpu = force_cpu or force_cpu_env
         
         try:
             model_name = embedding_model_name or os.getenv(
@@ -66,8 +74,8 @@ class DocumentProcessor:
 
             # AGGRESSIVE MEMORY OPTIMIZATION: Force CPU if requested or if GPU memory is too low
             device = "cpu"  # Default to CPU for safety
-            
-            if not force_cpu:
+
+            if not self.force_cpu:
                 if torch.cuda.is_available():
                     # Check available GPU memory
                     gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
@@ -116,22 +124,62 @@ class DocumentProcessor:
                 torch.cuda.reset_peak_memory_stats()
 
             logger.info(f"Loading embedding model: {model_name} on device: {device}")
-            
-            # Load model with memory optimization
-            self.embedding_model = SentenceTransformer(
-                model_name, 
-                device=device, 
-                trust_remote_code=trust_remote_code,
-                cache_folder=os.getenv("TRANSFORMERS_CACHE", None)
-            )
-            
-            # Move model to device explicitly and optimize
-            self.embedding_model = self.embedding_model.to(device)
-            if device == "cuda":
-                self.embedding_model.half()  # Use half precision to save memory
-                
-            logger.info(f"Successfully loaded Qwen-based embedding model: {model_name}")
-            logger.info(f"Ultra-memory optimized settings: batch_size={self.embedding_batch_size}, device={device}, workers=1")
+
+            # Load model with memory optimization and robust CPU fallback
+            try:
+                self.embedding_model = SentenceTransformer(
+                    model_name,
+                    device=device,
+                    trust_remote_code=trust_remote_code,
+                    cache_folder=os.getenv("TRANSFORMERS_CACHE", None),
+                )
+
+                # Move model to device explicitly and optimize
+                self.embedding_model = self.embedding_model.to(device)
+                if device == "cuda":
+                    self.embedding_model.half()  # Use half precision to save memory
+
+                logger.info(
+                    f"Successfully loaded Qwen-based embedding model: {model_name} on {device}"
+                )
+                logger.info(
+                    f"Ultra-memory optimized settings: batch_size={self.embedding_batch_size}, device={device}, workers=1"
+                )
+
+            except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
+                # Handle CUDA out of memory or runtime errors during model loading on GPU
+                if "out of memory" in str(e).lower() and device == "cuda":
+                    logger.warning(f"CUDA out of memory during model loading: {e}")
+                    logger.info("Falling back to CPU for model loading")
+
+                    # Clear GPU memory
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+
+                    # Try loading on CPU instead, and only raise if this also fails
+                    try:
+                        self.embedding_model = SentenceTransformer(
+                            model_name,
+                            device="cpu",
+                            trust_remote_code=trust_remote_code,
+                            cache_folder=os.getenv("TRANSFORMERS_CACHE", None),
+                        )
+                        self.device = "cpu"
+
+                        logger.info(
+                            f"Successfully loaded Qwen-based embedding model on CPU: {model_name}"
+                        )
+                        logger.info(
+                            "Ultra-memory optimized settings: batch_size=%s, device=cpu, workers=1",
+                            self.embedding_batch_size,
+                        )
+                    except Exception as cpu_e:
+                        logger.error(f"Failed to load embedding model on CPU after GPU OOM: {cpu_e}")
+                        raise
+                else:
+                    # Re-raise if it's a different kind of error or device is not CUDA
+                    raise
             
             # Log initial memory usage
             if self.memory_monitor:
@@ -534,21 +582,21 @@ class DocumentProcessor:
 
 
 class DocumentSummarizer:
-    """Generate summaries and metadata for documents using Qwen3 via Ollama"""
+    """Generate summaries and metadata for documents using Qwen model via HF TGI"""
 
     def __init__(self):
         try:
             from ollama_client import ollama_client
 
             self.ollama_client = ollama_client
-            logger.info("Initialized document summarizer with Ollama client")
+            logger.info("Initialized document summarizer with HF TGI client")
         except Exception as e:
             logger.error(
                 f"Failed to initialize Ollama client for summarization: {e}")
             self.ollama_client = None
 
     async def generate_summary_async(self, text: str, max_length: int = 200) -> str:
-        """Generate a summary of the document text using Qwen3"""
+        """Generate a summary of the document text using Qwen"""
         if not self.ollama_client:
             return self._fallback_summary(text, max_length)
 
@@ -556,7 +604,7 @@ class DocumentSummarizer:
             summary = await self.ollama_client.summarize_text(text, max_length)
             return summary
         except Exception as e:
-            logger.error(f"Error generating summary with Ollama: {e}")
+            logger.error(f"Error generating summary with HF TGI: {e}")
             return self._fallback_summary(text, max_length)
 
     def generate_summary(self, text: str, max_length: int = 200) -> str:

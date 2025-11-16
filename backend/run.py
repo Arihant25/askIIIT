@@ -9,6 +9,9 @@ import sys
 import logging
 from pathlib import Path
 
+# Set PyTorch CUDA allocation config to avoid fragmentation
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 # Add backend directory to Python path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
@@ -92,7 +95,7 @@ def main():
     from main import app
 
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8001))
     debug = os.getenv("DEBUG", "True").lower() == "true"
 
     logger.info(f"Starting server on {host}:{port} (debug={debug})")

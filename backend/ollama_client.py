@@ -1,5 +1,6 @@
 """
-Ollama client capabilities for Qwen models
+HF Text Generation Inference client for Qwen models
+Compatible with OpenAI-style /v1/chat/completions API
 """
 
 import os
@@ -15,74 +16,47 @@ logger = logging.getLogger(__name__)
 class OllamaClient:
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = base_url or os.getenv(
-            "OLLAMA_BASE_URL", "http://localhost:11434"
+            "OLLAMA_BASE_URL", "http://localhost:8000"
         )
-        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "qwen3:0.6B")
+        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "Qwen/Qwen3-1.7B")
         self.timeout = httpx.Timeout(300.0)  # 5 minutes for long operations
 
     async def check_connection(self) -> bool:
-        """Check if Ollama server is running"""
+        """Check if HF TGI server is running"""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
-                response = await client.get(f"{self.base_url}/api/tags")
+                response = await client.get(f"{self.base_url}/health")
                 return response.status_code == 200
         except Exception as e:
-            logger.error(f"Ollama connection failed: {e}")
+            logger.error(f"HF TGI connection failed: {e}")
             return False
 
     async def list_models(self) -> List[Dict[str, Any]]:
-        """List available models in Ollama"""
+        """List available models in HF TGI"""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-                response = await client.get(f"{self.base_url}/api/tags")
+                response = await client.get(f"{self.base_url}/v1/models")
                 response.raise_for_status()
                 data = response.json()
-                return data.get("models", [])
+                return data.get("data", [])
         except Exception as e:
             logger.error(f"Failed to list models: {e}")
             return []
 
     async def ensure_model_available(self, model_name: str) -> bool:
-        """Ensure a model is available, pull if necessary"""
+        """Ensure model is available (HF TGI doesn't support pulling, assume pre-loaded)"""
         try:
-            models = await self.list_models()
-            available_models = [model["name"] for model in models]
-
-            if model_name in available_models:
-                logger.info(f"Model {model_name} is already available")
+            # For HF TGI, the model is assumed to be already running
+            # Just verify the service is available
+            is_available = await self.check_connection()
+            if is_available:
+                # logger.info(f"HF TGI service is available with model ready")
                 return True
-
-            logger.info(f"Pulling model {model_name}...")
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0)
-            ) as client:  # 10 minutes for model pull
-                async with client.stream(
-                    "POST", f"{self.base_url}/api/pull", json={"name": model_name}
-                ) as response:
-                    response.raise_for_status()
-                    last_status = ""
-                    async for line in response.aiter_lines():
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                if "status" in data:
-                                    current_status = data['status']
-                                    # Only log when status changes to reduce spam
-                                    if current_status != last_status:
-                                        logger.info(
-                                            f"Pull status: {current_status}")
-                                        last_status = current_status
-
-                                    if current_status == "success":
-                                        logger.info(
-                                            f"Model {model_name} pulled successfully")
-                                        return True
-                            except json.JSONDecodeError:
-                                continue
-
-            return False
+            else:
+                logger.error(f"HF TGI service not available")
+                return False
         except Exception as e:
-            logger.error(f"Failed to ensure model availability: {e}")
+            logger.error(f"Failed to verify model availability: {e}")
             return False
 
     async def generate_response(
@@ -90,50 +64,54 @@ class OllamaClient:
         prompt: str,
         context: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
+        context_metadata: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-        """Generate response using Qwen chat model"""
+        """Generate response using Qwen model via HF TGI /v1/chat/completions API"""
         try:
             # Ensure chat model is available
             if not await self.ensure_model_available(self.chat_model):
                 raise Exception(f"Chat model {self.chat_model} not available")
 
-            # Build the full prompt
-            full_prompt = ""
-
+            # Build messages in OpenAI format
+            messages = []
+            
             if system_prompt:
-                full_prompt += f"System: {system_prompt}\n\n"
-
-            if context:
-                full_prompt += "Context:\n"
+                messages.append({"role": "system", "content": system_prompt})
+            
+            if context and context_metadata:
+                context_text = "Context from the following documents:\n"
+                # Limit to 5 context chunks and track their filenames
+                for i, (ctx, metadata) in enumerate(zip(context[:5], context_metadata[:5])):
+                    filename = metadata.get('filename', 'Unknown')
+                    context_text += f"{i+1}. [From: {filename}] {ctx}\n\n"
+                messages.append({"role": "system", "content": context_text})
+            elif context:
+                context_text = "Context:\n"
                 # Limit to 5 context chunks
                 for i, ctx in enumerate(context[:5]):
-                    full_prompt += f"{i+1}. {ctx}\n"
-                full_prompt += "\n"
-
-            full_prompt += f"User: {prompt}\n\nAssistant:"
+                    context_text += f"{i+1}. {ctx}\n"
+                messages.append({"role": "system", "content": context_text})
+            
+            messages.append({"role": "user", "content": prompt})
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
-                    f"{self.base_url}/api/generate",
+                    f"{self.base_url}/v1/chat/completions",
                     json={
                         "model": self.chat_model,
-                        "prompt": full_prompt,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
                         "stream": False,
-                        "think": False,
-                        "options": {
-                            "temperature": 0.7,
-                            "top_p": 0.9,
-                            "max_tokens": 4096,
-                        },
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
 
-                if "response" in data:
-                    return data["response"].strip()
+                if "choices" in data and len(data["choices"]) > 0:
+                    return data["choices"][0]["message"]["content"].strip()
                 else:
-                    logger.error("No response in Ollama API response")
+                    logger.error("No response in HF TGI API response")
                     return (
                         "I apologize, but I couldn't generate a response at this time."
                     )
@@ -147,58 +125,70 @@ class OllamaClient:
         prompt: str,
         context: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
+        context_metadata: Optional[List[Dict[str, Any]]] = None,
     ):
-        """Generate streaming response using Qwen chat model"""
+        """Generate streaming response using Qwen model via HF TGI /v1/chat/completions API"""
         try:
             # Ensure chat model is available
             if not await self.ensure_model_available(self.chat_model):
                 raise Exception(f"Chat model {self.chat_model} not available")
 
-            # Build the full prompt
-            full_prompt = ""
-
+            # Build messages in OpenAI format
+            messages = []
+            
             if system_prompt:
-                full_prompt += f"System: {system_prompt}\n\n"
-
-            if context:
-                full_prompt += "Context:\n"
+                messages.append({"role": "system", "content": system_prompt})
+            
+            if context and context_metadata:
+                context_text = "Context from the following documents:\n"
+                # Limit to 5 context chunks and track their filenames
+                for i, (ctx, metadata) in enumerate(zip(context[:5], context_metadata[:5])):
+                    filename = metadata.get('filename', 'Unknown')
+                    context_text += f"{i+1}. [From: {filename}] {ctx}\n\n"
+                messages.append({"role": "system", "content": context_text})
+            elif context:
+                context_text = "Context:\n"
                 # Limit to 5 context chunks
                 for i, ctx in enumerate(context[:5]):
-                    full_prompt += f"{i+1}. {ctx}\n"
-                full_prompt += "\n"
-
-            full_prompt += f"User: {prompt}\n\nAssistant:"
+                    context_text += f"{i+1}. {ctx}\n"
+                messages.append({"role": "system", "content": context_text})
+            
+            messages.append({"role": "user", "content": prompt})
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
                     "POST",
-                    f"{self.base_url}/api/generate",
+                    f"{self.base_url}/v1/chat/completions",
                     json={
                         "model": self.chat_model,
-                        "prompt": full_prompt,
+                        "messages": messages,
+                        "temperature": 0.7,
+                        "top_p": 0.9,
+                        "max_tokens": 4096,
                         "stream": True,
-                        "think": False,
-                        "options": {
-                            "temperature": 0.7,
-                            "top_p": 0.9,
-                            "max_tokens": 4096,
-                            "num_predict": 4096,
-                        },
                     },
                 ) as response:
                     response.raise_for_status()
-                    buffer = ""
                     async for line in response.aiter_lines():
                         if line:
+                            # Remove 'data: ' prefix if present
+                            if line.startswith("data: "):
+                                line = line[6:]
+                            
+                            # Skip [DONE] messages
+                            if line == "[DONE]":
+                                break
+                            
                             try:
                                 data = json.loads(line)
-                                if "response" in data and data["response"]:
-                                    # Yield each character or small chunk immediately
-                                    response_text = data["response"]
-                                    for char in response_text:
-                                        yield char
-                                if data.get("done", False):
-                                    break
+                                if "choices" in data and len(data["choices"]) > 0:
+                                    choice = data["choices"][0]
+                                    if "delta" in choice and "content" in choice["delta"]:
+                                        content = choice["delta"]["content"]
+                                        if content:
+                                            # Yield each chunk immediately
+                                            for char in content:
+                                                yield char
                             except json.JSONDecodeError:
                                 continue
 
@@ -294,6 +284,25 @@ class OllamaClient:
             logger.error(f"Error categorizing document: {e}")
             return "academics"  # Default fallback
 
+    def extract_referenced_files(self, response: str, available_files: List[str]) -> List[str]:
+        """Extract which files were actually referenced from the LLM response"""
+        try:
+            # Look for files mentioned in the response
+            referenced_files = []
+            response_lower = response.lower()
+            
+            for filename in available_files:
+                # Check if filename (case-insensitive) appears in the response
+                if filename.lower() in response_lower:
+                    referenced_files.append(filename)
+            
+            logger.info(f"Extracted {len(referenced_files)} referenced files from response")
+            return referenced_files
+        except Exception as e:
+            logger.error(f"Error extracting referenced files: {e}")
+            # Return all files if extraction fails
+            return available_files
 
-# Global Ollama client instance
+
+# Global HF TGI client instance
 ollama_client = OllamaClient()

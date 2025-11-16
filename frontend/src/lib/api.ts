@@ -1,5 +1,5 @@
 // API configuration
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 export const API_ENDPOINTS = {
   CHAT: `${API_BASE_URL}/api/chat`,
@@ -89,6 +89,12 @@ class ApiService {
 
               if (data.type === "metadata") {
                 metadata = data;
+                onMessage?.(data);
+              } else if (data.type === "metadata_update") {
+                // Update metadata with filtered references
+                if (metadata) {
+                  metadata.context_chunks = data.context_chunks;
+                }
                 onMessage?.(data);
               } else if (data.type === "content") {
                 if (data.content) {

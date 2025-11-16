@@ -1,13 +1,13 @@
 # Jagruti Backend
 
-A FastAPI-based backend with ChromaDB for document search and chatbot functionality using **Qwen3 models** with CAS authentication.
+A FastAPI-based backend with ChromaDB for document search and chatbot functionality using **Qwen 3-0.6B** with CAS authentication.
 
 ## Features
 
 - **FastAPI** REST API with automatic documentation
 - **ChromaDB** for vector embeddings and semantic search
-- **Qwen3-Embedding-8B** via sentence-transformers for high-quality embeddings
-- **Qwen3 (8B)** via Ollama for chat and summarization
+- **Qwen3-Embedding-0.6B** via sentence-transformers for embeddings
+- **Qwen 3-0.6B** via Hugging Face Text Generation Inference for chat and summarization
 - **CAS Authentication** integration for IIIT login
 - **Document Processing** with text extraction and chunking
 - **Semantic Search** using Qwen3 embeddings
@@ -17,7 +17,7 @@ A FastAPI-based backend with ChromaDB for document search and chatbot functional
 ## Models Used
 
 - **Embeddings**: `Qwen/Qwen3-Embedding-8B` via Hugging Face sentence-transformers
-- **Chat/Summarization**: `qwen3:8b` via Ollama
+- **Chat/Summarization**: `Qwen/Qwen3-1.7B` via Hugging Face Text Generation Inference
 
 ## Setup
 
@@ -28,20 +28,16 @@ cd backend
 pip install -r requirements.txt
 ```
 
-### 2. Install and Setup Ollama
+### 2. Setup Hugging Face Text Generation Inference
 
-Download and install Ollama from [https://ollama.ai/download](https://ollama.ai/download)
-
-Start Ollama server:
+Start the HF TGI Docker container with Qwen model:
 
 ```bash
-ollama serve
-```
-
-Pull the Qwen model:
-
-```bash
-ollama pull qwen3:8b
+docker run --gpus all \
+    -v ~/.cache/huggingface:/root/.cache/huggingface \
+    -p 8000:80 \
+    ghcr.io/huggingface/text-generation-inference:latest \
+    --model-id Qwen/Qwen3-1.7B
 ```
 
 ### 3. Run Setup Script
@@ -57,9 +53,9 @@ python setup.py
 The `.env` file is pre-configured with defaults. Update these settings as needed:
 
 ```env
-# Ollama settings
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_CHAT_MODEL=qwen3:8b
+# HF TGI Configuration
+OLLAMA_BASE_URL=http://localhost:8000
+OLLAMA_CHAT_MODEL=Qwen/Qwen3-1.7B
 
 # Embedding model (Hugging Face)
 EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
@@ -146,18 +142,18 @@ python bulk_process.py --process
 
 ### Embedding Pipeline
 
-1. **Text Extraction**: PyPDF2 for PDFs, direct reading for text files
-2. **Text Chunking**: Split into 500-character chunks with 50-character overlap
-3. **Embedding Generation**: Qwen3-Embedding-8B via sentence-transformers
+1. **Text Extraction**: pdfplumber for PDFs, direct reading for text files
+2. **Text Chunking**: Split into 400-character chunks with 50-character overlap (memory optimized)
+3. **Embedding Generation**: Qwen3-Embedding-0.6B via sentence-transformers
 4. **Storage**: Vector embeddings stored in ChromaDB with metadata
 
 ### Chat Pipeline
 
-1. **Query Processing**: Convert user query to embedding using Qwen3-Embedding-8B
+1. **Query Processing**: Convert user query to embedding using Qwen3-Embedding-0.6B
 2. **Conversation Context**: Include previous messages from the conversation for continuity
 3. **Similarity Search**: Find relevant chunks in ChromaDB
 4. **Context Preparation**: Format relevant chunks and conversation history as context
-5. **Response Generation**: Qwen3 (8B) via Ollama generates response with full context
+5. **Response Generation**: Qwen 3-0.6B via Hugging Face TGI generates response with full context
 6. **Response**: Natural language answer with source references and conversation memory
 
 ## API Documentation
@@ -179,24 +175,25 @@ Once the server is running, visit:
 ### Software
 
 - **Python**: 3.8+
-- **Ollama**: Latest version
-- **CUDA**: Optional, for GPU acceleration
+- **Docker**: For running Hugging Face Text Generation Inference
+- **CUDA**: Optional, for GPU acceleration (highly recommended for Qwen model)
 
 ## Model Performance
 
-### Qwen3-Embedding-8B
+### Qwen3-Embedding-0.6B
 
-- **Dimension**: 1024
-- **Performance**: State-of-the-art multilingual embeddings
-- **Languages**: Excellent support for English and Chinese
-- **Use Case**: Document similarity and semantic search
+- **Dimension**: 384
+- **Performance**: Lightweight yet effective embeddings
+- **Languages**: Good support for English
+- **Use Case**: Document similarity and semantic search with lower memory footprint
 
-### Qwen3 (8B) Chat Model
+### Qwen 3-1.7B Chat Model
 
-- **Parameters**: 8 billion
-- **Performance**: High-quality conversational AI
-- **Context Length**: 32K tokens
+- **Parameters**: 0.6 billion
+- **Performance**: Fast and efficient conversational AI
+- **Context Length**: 8K tokens
 - **Use Case**: Document-based Q&A and summarization
+- **Deployment**: Via Hugging Face Text Generation Inference Docker container
 
 ## File Structure
 
@@ -204,7 +201,7 @@ Once the server is running, visit:
 backend/
 ├── main.py                 # Main FastAPI application
 ├── document_processor.py   # Document processing with Qwen3 embeddings
-├── ollama_client.py       # Ollama client for Qwen3 chat
+├── ollama_client.py        # Client for HF TGI inference model
 ├── auth_utils.py          # CAS authentication utilities
 ├── scraper.py             # Web scraping utilities
 ├── bulk_process.py        # Bulk PDF processing script
@@ -252,11 +249,15 @@ print(result)
 
 ### Common Issues
 
-1. **Ollama connection fails**:
+1. **Hugging Face TGI server fails**:
 
    ```bash
-   ollama serve  # Start Ollama server
-   ollama pull qwen3:8b  # Ensure model is downloaded
+   # Start HF TGI Docker container for Qwen
+   docker run --gpus all \
+       -v ~/.cache/huggingface:/root/.cache/huggingface \
+       -p 8000:80 \
+       ghcr.io/huggingface/text-generation-inference:latest \
+       --model-id Qwen/Qwen3-1.7B
    ```
 
 2. **Embedding model download fails**:
@@ -303,7 +304,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 3. **Monitoring**:
    - Monitor model performance and response times
-   - Set up health checks for Ollama
+   - Set up health checks for HF TGI
    - Track embedding generation metrics
    - Monitor ChromaDB storage usage
 

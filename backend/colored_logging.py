@@ -31,7 +31,7 @@ class ColoredFormatter(logging.Formatter):
         'cas': Fore.YELLOW + Style.DIM,
         'document_processor': Fore.CYAN + Style.BRIGHT,
         'bulk_process': Fore.CYAN + Style.DIM,
-        'ollama_client': Fore.MAGENTA,
+        'hf_tgi_client': Fore.MAGENTA,
         'embedding': Fore.MAGENTA + Style.DIM,
         'chromadb': Fore.GREEN + Style.DIM,
         'database': Fore.GREEN + Style.DIM,
@@ -67,8 +67,8 @@ class ColoredFormatter(logging.Formatter):
             return 'auth_utils'
         elif any(pattern in name_lower for pattern in ['document', 'process', 'pdf']):
             return 'document_processor'
-        elif any(pattern in name_lower for pattern in ['ollama', 'llm', 'ai', 'model']):
-            return 'ollama_client'
+        elif any(pattern in name_lower for pattern in ['hf_tgi', 'tgi', 'llm', 'ai', 'model']):
+            return 'hf_tgi_client'
         elif any(pattern in name_lower for pattern in ['chroma', 'db', 'database']):
             return 'chromadb'
         elif any(pattern in name_lower for pattern in ['api', 'fastapi', 'endpoint']):
