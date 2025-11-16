@@ -17,7 +17,7 @@ A FastAPI-based backend with ChromaDB for document search and chatbot functional
 ## Models Used
 
 - **Embeddings**: `Qwen/Qwen3-Embedding-8B` via Hugging Face sentence-transformers
-- **Chat/Summarization**: `Qwen/Qwen3-1.7B` via Hugging Face Text Generation Inference
+- **Chat/Summarization**: `google/gemma-3-270m` via Hugging Face Text Generation Inference
 
 ## Setup
 
@@ -37,7 +37,7 @@ docker run --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
     -p 8000:80 \
     ghcr.io/huggingface/text-generation-inference:latest \
-    --model-id Qwen/Qwen3-1.7B
+    --model-id google/gemma-3-270m
 ```
 
 ### 3. Run Setup Script
@@ -55,7 +55,7 @@ The `.env` file is pre-configured with defaults. Update these settings as needed
 ```env
 # HF TGI Configuration
 OLLAMA_BASE_URL=http://localhost:8000
-OLLAMA_CHAT_MODEL=Qwen/Qwen3-1.7B
+OLLAMA_CHAT_MODEL=google/gemma-3-270m
 
 # Embedding model (Hugging Face)
 EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B
@@ -257,7 +257,7 @@ print(result)
        -v ~/.cache/huggingface:/root/.cache/huggingface \
        -p 8000:80 \
        ghcr.io/huggingface/text-generation-inference:latest \
-       --model-id Qwen/Qwen3-1.7B
+       --model-id google/gemma-3-270m
    ```
 
 2. **Embedding model download fails**:

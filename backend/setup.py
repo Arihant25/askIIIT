@@ -41,7 +41,7 @@ async def setup_inference_model():
         logger.error("    -v ~/.cache/huggingface:/root/.cache/huggingface \\")
         logger.error("    -p 8000:80 \\")
         logger.error("    ghcr.io/huggingface/text-generation-inference:latest \\")
-        logger.error("    --model-id Qwen/Qwen3-1.7B")
+        logger.error("    --model-id google/gemma-3-270m")
         return False
 
     # Import client

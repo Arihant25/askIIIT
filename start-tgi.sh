@@ -4,7 +4,7 @@ volume=$PWD/models # share a volume with the Docker container to avoid downloadi
 # Load environment variables
 source .env
 
-docker run --gpus all --shm-size 1g -p 8080:80 -v $volume:/models \
+docker run --gpus all --shm-size 1g -p 8000:80 -v $volume:/models \
     -e HF_TOKEN=$HF_TOKEN \
     ghcr.io/huggingface/text-generation-inference:latest \
     --model-id $model \

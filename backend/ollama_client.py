@@ -1,5 +1,5 @@
 """
-HF Text Generation Inference client for Qwen models
+HF Text Generation Inference client for language models
 Compatible with OpenAI-style /v1/chat/completions API
 """
 
@@ -18,7 +18,7 @@ class OllamaClient:
         self.base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL", "http://localhost:8000"
         )
-        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "Qwen/Qwen3-1.7B")
+        self.chat_model = os.getenv("OLLAMA_CHAT_MODEL", "google/gemma-3-270m")
         self.timeout = httpx.Timeout(300.0)  # 5 minutes for long operations
 
     async def check_connection(self) -> bool:
@@ -66,7 +66,7 @@ class OllamaClient:
         system_prompt: Optional[str] = None,
         context_metadata: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-        """Generate response using Qwen model via HF TGI /v1/chat/completions API"""
+        """Generate response using chat model via HF TGI /v1/chat/completions API"""
         try:
             # Ensure chat model is available
             if not await self.ensure_model_available(self.chat_model):
@@ -127,7 +127,7 @@ class OllamaClient:
         system_prompt: Optional[str] = None,
         context_metadata: Optional[List[Dict[str, Any]]] = None,
     ):
-        """Generate streaming response using Qwen model via HF TGI /v1/chat/completions API"""
+        """Generate streaming response using HF TGI /v1/chat/completions API"""
         try:
             # Ensure chat model is available
             if not await self.ensure_model_available(self.chat_model):
@@ -197,7 +197,7 @@ class OllamaClient:
             yield f"I encountered an error while processing your request: {str(e)}"
 
     async def summarize_text(self, text: str, max_length: int = 200) -> str:
-        """Generate summary of text using Qwen model"""
+        """Generate summary of text using chat model"""
         try:
             # Truncate text if too long
             if len(text) > 4000:
@@ -226,7 +226,7 @@ class OllamaClient:
             return f"Document summary (auto-generated): {text[:100]}..."
 
     async def categorize_document(self, filename: str, text: str) -> str:
-        """Automatically categorize document using Qwen model"""
+        """Automatically categorize document using chat model"""
         try:
             system_prompt = (
                 "You are a document categorization assistant. "
