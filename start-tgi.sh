@@ -1,4 +1,4 @@
-model=google/gemma-3-270m
+model=Qwen/Qwen3-1.7B
 volume=$PWD/models # share a volume with the Docker container to avoid downloading weights every run
 
 # Load environment variables
